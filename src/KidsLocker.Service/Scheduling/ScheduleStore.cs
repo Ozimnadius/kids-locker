@@ -1,0 +1,131 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using KidsLocker.Service.Config;
+
+namespace KidsLocker.Service.Scheduling;
+
+/// <summary>
+/// Authoritative in-memory schedule, mirrored to schedule.json under %ProgramData%\KidsLocker.
+/// The service (enforcement loop + Telegram handler) is the only legitimate writer. Any edit
+/// to the file made outside the app is detected via a content hash and reverted, so an admin
+/// user can't silently flip "Enabled":false in Notepad. Thread-safe; writes are atomic.
+/// </summary>
+public sealed class ScheduleStore
+{
+    private readonly object _gate = new();
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true,
+    };
+
+    private Schedule? _current;
+    private string _lastHash = "";
+
+    /// <summary>A defensive copy of the current schedule (safe to read/enumerate freely).</summary>
+    public Schedule Get()
+    {
+        lock (_gate)
+        {
+            EnsureLoaded();
+            return Clone(_current!);
+        }
+    }
+
+    /// <summary>Back-compat alias used by the command handler.</summary>
+    public Schedule Load() => Get();
+
+    /// <summary>Mutate the authoritative schedule under lock and persist atomically.</summary>
+    public Schedule Update(Action<Schedule> mutate)
+    {
+        lock (_gate)
+        {
+            EnsureLoaded();
+            mutate(_current!);
+            WriteToDisk(_current!);
+            return Clone(_current!);
+        }
+    }
+
+    public void Save(Schedule schedule)
+    {
+        lock (_gate)
+        {
+            _current = schedule;
+            WriteToDisk(schedule);
+        }
+    }
+
+    /// <summary>
+    /// Compare the on-disk file against what we last wrote. If it differs (external edit or
+    /// deletion), restore our authoritative copy and return true so the caller can alert.
+    /// Legitimate edits (Telegram commands) go through <see cref="Update"/>/<see cref="Save"/>
+    /// and update the baseline, so they never register as tampering.
+    /// </summary>
+    public bool SyncAndDetectTamper()
+    {
+        lock (_gate)
+        {
+            EnsureLoaded();
+            string diskHash;
+            try
+            {
+                diskHash = File.Exists(AppPaths.ScheduleFile)
+                    ? Hash(File.ReadAllText(AppPaths.ScheduleFile))
+                    : "";
+            }
+            catch
+            {
+                return false; // transient read error — don't cry wolf
+            }
+
+            if (diskHash == _lastHash)
+                return false;
+
+            WriteToDisk(_current!); // revert to authoritative copy
+            return true;
+        }
+    }
+
+    private void EnsureLoaded()
+    {
+        if (_current is not null) return;
+        try
+        {
+            if (File.Exists(AppPaths.ScheduleFile))
+            {
+                var json = File.ReadAllText(AppPaths.ScheduleFile);
+                var s = JsonSerializer.Deserialize<Schedule>(json, JsonOpts);
+                if (s is not null)
+                {
+                    _current = s;
+                    _lastHash = Hash(json); // baseline = actual disk content
+                    return;
+                }
+            }
+        }
+        catch
+        {
+            // Corrupt file → fail safe to the default (which blocks at night).
+        }
+        _current = Schedule.Default();
+        WriteToDisk(_current);
+    }
+
+    private void WriteToDisk(Schedule s)
+    {
+        AppPaths.EnsureRoot();
+        var json = JsonSerializer.Serialize(s, JsonOpts);
+        var tmp = AppPaths.ScheduleFile + ".tmp";
+        File.WriteAllText(tmp, json);
+        File.Move(tmp, AppPaths.ScheduleFile, overwrite: true);
+        _lastHash = Hash(json);
+    }
+
+    private static Schedule Clone(Schedule s) =>
+        JsonSerializer.Deserialize<Schedule>(JsonSerializer.Serialize(s, JsonOpts), JsonOpts)!;
+
+    private static string Hash(string content) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
+}

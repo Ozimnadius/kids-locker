@@ -1,0 +1,24 @@
+# .NET
+bin/
+obj/
+*.user
+publish/
+publish*/
+artifacts/
+
+# IDE
+.idea/
+.vs/
+
+# Local runtime config with secrets (token, chat_id) — never commit
+appsettings.Local.json
+config.local.json
+*.secret.json
+
+# Logs
+*.log
+logs/
+
+# OS
+Thumbs.db
+Desktop.ini
