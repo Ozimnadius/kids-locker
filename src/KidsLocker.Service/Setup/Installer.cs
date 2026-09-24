@@ -87,12 +87,12 @@ public static class Installer
         void L(string m) => log?.Invoke(m);
         if (!IsElevated()) throw new InvalidOperationException("Требуются права администратора.");
 
+        // Stop the service first so it can't self-heal (recreate tasks/keys) while we remove them.
         RemoveTasks();
-        L("Задачи удалены.");
-
-        UnregisterSafeBoot();
         StopAndDeleteService(L);
-        L("Служба удалена.");
+        RemoveTasks();          // again, in case the service recreated a task during the stop window
+        UnregisterSafeBoot();
+        L("Служба и задачи удалены.");
 
         try { if (Directory.Exists(InstallDir)) Directory.Delete(InstallDir, recursive: true); } catch { }
         if (!keepData)
@@ -140,11 +140,43 @@ public static class Installer
                 $"delete \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\{set}\\{ServiceName}\" /f");
     }
 
+    /// <summary>
+    /// Self-heal: called periodically by the running service (as SYSTEM). Recreates the
+    /// scheduled tasks and Safe Mode registration if they were deleted. Returns a description
+    /// of what was restored (empty string if nothing), so the caller can alert the parent.
+    /// The service itself is kept alive by the guardian task and SCM recovery.
+    /// </summary>
+    public static string EnsureHardening(bool dryRun)
+    {
+        var restored = new List<string>();
+
+        if (!TaskExists(GuardianTask) || !TaskExists(EnforceTask))
+        {
+            CreateTasks(dryRun, _ => { });
+            restored.Add("задачи планировщика");
+        }
+
+        if (!SafeBootExists("Minimal") || !SafeBootExists("Network"))
+        {
+            RegisterSafeBoot(_ => { });
+            restored.Add("режим Safe Mode");
+        }
+
+        return string.Join(", ", restored);
+    }
+
+    private static bool TaskExists(string name) =>
+        RunProcess("schtasks.exe", $"/query /tn \"{name}\"").code == 0;
+
+    private static bool SafeBootExists(string set) =>
+        RunProcess("reg.exe", $"query \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\{set}\\{ServiceName}\"").code == 0;
+
     /// <summary>Stop and remove the service, waiting for the SCM to drop it and the process to exit.</summary>
     private static void StopAndDeleteService(Action<string> L)
     {
         if (ServiceControl.GetState() == ServiceControl.State.Missing) return;
 
+        StopMarker.WriteExpected(); // our stop — don't trigger the "control stopped" alert
         ServiceControl.TryStop();
         RunProcess("sc.exe", $"delete {ServiceName}");
         for (var i = 0; i < 20 && ServiceControl.GetState() != ServiceControl.State.Missing; i++)

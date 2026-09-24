@@ -17,6 +17,10 @@ public static class AppPaths
     public static string StateFile => Path.Combine(RootDir, "state.json");
     public static string LogDir => Path.Combine(RootDir, "logs");
 
+    /// <summary>Marker the app writes right before it stops the service on purpose, so the
+    /// service's stop-alert can tell an app-initiated restart from someone killing it.</summary>
+    public static string ExpectedStopFile => Path.Combine(RootDir, ".expected_stop");
+
     public static void EnsureRoot()
     {
         Directory.CreateDirectory(RootDir);

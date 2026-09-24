@@ -7,6 +7,7 @@ namespace KidsLocker.Tests;
 /// Exercises the tamper-detection path. Points KIDSLOCKER_HOME at a throwaway temp dir so
 /// the real %ProgramData% is never touched.
 /// </summary>
+[Collection("EnvHome")]
 public class ScheduleStoreTamperTests : IDisposable
 {
     private readonly string _home;

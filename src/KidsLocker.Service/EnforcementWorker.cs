@@ -4,7 +4,9 @@ using KidsLocker.Service.Config;
 using KidsLocker.Service.Enforcement;
 using KidsLocker.Service.Notifications;
 using KidsLocker.Service.Scheduling;
+using KidsLocker.Service.Setup;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Logging;
 
 namespace KidsLocker.Service;
@@ -26,6 +28,7 @@ public sealed class EnforcementWorker : BackgroundService
     private bool? _wasBlocked;
     private DateTime _lastWallUtc;
     private long _lastStamp;
+    private DateTime _lastHardenUtc = DateTime.UtcNow;
 
     public EnforcementWorker(
         ILogger<EnforcementWorker> log,
@@ -91,6 +94,32 @@ public sealed class EnforcementWorker : BackgroundService
         }
 
         _wasBlocked = eval.Blocked;
+
+        SelfHeal();
+    }
+
+    /// <summary>
+    /// Periodically (as the installed service) re-assert the scheduled tasks and Safe Mode
+    /// registration, recreating anything that was deleted and alerting the parent. Combined
+    /// with the guardian task reviving the service, dismantling requires removing every piece
+    /// faster than this cycle — much harder than deleting one thing.
+    /// </summary>
+    private void SelfHeal()
+    {
+        if (!WindowsServiceHelpers.IsWindowsService()) return; // never touch tasks/registry in dev/console runs
+        if (DateTime.UtcNow - _lastHardenUtc < TimeSpan.FromMinutes(5)) return;
+
+        _lastHardenUtc = DateTime.UtcNow;
+        try
+        {
+            var restored = Installer.EnsureHardening(dryRun: !_enforcer.IsLive);
+            if (!string.IsNullOrEmpty(restored))
+                _notifier.Alert($"Кто-то удалял защиту ({restored}) — восстановил.");
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Self-heal failed");
+        }
     }
 
     /// <summary>Compare wall-clock delta against a monotonic timer to spot clock tampering.</summary>

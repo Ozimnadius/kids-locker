@@ -82,7 +82,11 @@ public static class ServiceControl
     public static void ApplyWithReload(Action write)
     {
         var running = GetState() == State.Running;
-        if (running) TryStop();
+        if (running)
+        {
+            StopMarker.WriteExpected(); // this stop is ours — suppress the "control stopped" alert
+            TryStop();
+        }
         write();
         if (running) TryStart();
     }

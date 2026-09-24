@@ -80,6 +80,7 @@ internal static class Program
         builder.Services.AddSingleton(sp => new Enforcer(sp.GetRequiredService<ILogger<Enforcer>>(), sp.GetRequiredService<Notifier>(), live));
         builder.Services.AddSingleton(sp => new CommandHandler(sp.GetRequiredService<ScheduleStore>(), sp.GetRequiredService<Enforcer>()));
         builder.Services.AddHostedService<EnforcementWorker>();
+        builder.Services.AddHostedService<StopAlertService>();
 
         if (telegram is not null)
         {
