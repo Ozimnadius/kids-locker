@@ -86,7 +86,10 @@ public static class ScheduleEvaluator
             foreach (var (from, to) in AllowedFor(s, day))
             {
                 Add(candidates, day + from, nowLocal);
-                Add(candidates, day + (to >= TimeParsing.EndOfDay ? TimeParsing.EndOfDay - TimeSpan.FromTicks(1) : to), nowLocal);
+                // `to` is the first blocked instant of the interval. For a 24:00 end that instant is
+                // the next day's 00:00 — the real allowed→blocked flip. Clamping it back to 23:59:59.9
+                // (still allowed) made NextChange miss the midnight boundary entirely.
+                Add(candidates, day + to, nowLocal);
             }
         }
 
@@ -100,5 +103,27 @@ public static class ScheduleEvaluator
     private static void Add(SortedSet<DateTime> set, DateTime instant, DateTime after)
     {
         if (instant > after) set.Add(instant);
+    }
+
+    /// <summary>
+    /// Compute a one-off extra allowed interval of <paramref name="minutes"/> for today: it starts
+    /// at the later of "now" and the end of today's last allowed block, and is clamped to the end of
+    /// the day. Returns null when nothing can be added (non-positive minutes, or today is already
+    /// allowed right up to midnight) so callers can tell the user truthfully instead of silently
+    /// recording an empty 24:00–24:00 interval. Shared by the Telegram <c>/extra</c> and the GUI button.
+    /// </summary>
+    public static DatedInterval? BuildExtra(Schedule s, DateTime now, int minutes)
+    {
+        if (minutes <= 0) return null;
+
+        var latestTo = AllowedFor(s, now).Select(r => r.To).DefaultIfEmpty(now.TimeOfDay).Max();
+        var start = now.TimeOfDay > latestTo ? now.TimeOfDay : latestTo;
+        if (start >= TimeParsing.EndOfDay) return null; // already allowed to the end of the day
+
+        var end = start + TimeSpan.FromMinutes(minutes);
+        if (end > TimeParsing.EndOfDay) end = TimeParsing.EndOfDay;
+        if (end <= start) return null;
+
+        return new DatedInterval(now.ToString("yyyy-MM-dd"), TimeParsing.Format(start), TimeParsing.Format(end));
     }
 }

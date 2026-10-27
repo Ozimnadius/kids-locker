@@ -118,11 +118,14 @@ public sealed class CommandHandler
         var days = ResolveDays(args[0]);
         if (days.Count == 0) return $"Не понял день «{args[0]}». Дни: пн вт ср чт пт сб вс, будни, выходные, все.";
 
-        var intervals = ParseIntervals(args[1]);
-        // "off"/"нет" clears the day
-        var clear = args[1].Equals("off", StringComparison.OrdinalIgnoreCase)
-                    || args[1].Equals("нет", StringComparison.OrdinalIgnoreCase)
-                    || args[1].Equals("-", StringComparison.Ordinal);
+        // Everything after the day is the spec. Telegram splits the command on spaces, so a spec
+        // like "07:00-12:00, 14:00-23:00" (exactly how /schedule and the GUI print it) arrives as
+        // several args — join them back, or the second interval is silently dropped.
+        var spec = string.Join(" ", args.Skip(1));
+        var clear = spec.Equals("off", StringComparison.OrdinalIgnoreCase)
+                    || spec.Equals("нет", StringComparison.OrdinalIgnoreCase)
+                    || spec.Equals("-", StringComparison.Ordinal);
+        var intervals = ScheduleText.ParseIntervals(spec);
         if (!clear && intervals.Count == 0)
             return "Не разобрал интервалы. Пример: 07:00-23:00 или 07:00-12:00,14:00-23:00";
 
@@ -140,19 +143,12 @@ public sealed class CommandHandler
             return "Формат: /extra <минуты>. Напр.: /extra 60 — добавить час сегодня.";
 
         var now = _now();
-        var s = _store.Load();
+        var extra = ScheduleEvaluator.BuildExtra(_store.Load(), now, minutes);
+        if (extra is null)
+            return "Сегодня уже разрешено до конца суток — добавлять нечего.";
 
-        var latestTo = ScheduleEvaluator.AllowedFor(s, now)
-            .Select(r => r.To)
-            .DefaultIfEmpty(now.TimeOfDay)
-            .Max();
-        var start = now.TimeOfDay > latestTo ? now.TimeOfDay : latestTo;
-        var end = start + TimeSpan.FromMinutes(minutes);
-        if (end > TimeParsing.EndOfDay) end = TimeParsing.EndOfDay;
-
-        var date = now.ToString("yyyy-MM-dd");
-        _store.Update(sc => sc.Extras.Add(new DatedInterval(date, TimeParsing.Format(start), TimeParsing.Format(end))));
-        return $"Добавил сегодня {TimeParsing.Format(start)}–{TimeParsing.Format(end)}.";
+        _store.Update(sc => sc.Extras.Add(extra));
+        return $"Добавил сегодня {extra.From}–{extra.To}.";
     }
 
     private string Pause(string[] args)
@@ -221,46 +217,45 @@ public sealed class CommandHandler
         return map.TryGetValue(t, out var d) ? new() { d } : new();
     }
 
-    private static List<Interval> ParseIntervals(string token)
-    {
-        var result = new List<Interval>();
-        foreach (var piece in token.Split(',', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var hy = piece.Split('-', '–');
-            if (hy.Length != 2) continue;
-            if (!TimeParsing.TryParse(hy[0], out var f) || !TimeParsing.TryParse(hy[1], out var tt)) continue;
-            if (tt <= f) continue;
-            result.Add(new Interval(TimeParsing.Format(f), TimeParsing.Format(tt)));
-        }
-        return result;
-    }
-
-    /// <summary>Parse "90m", "2h", "1h30m", or a bare number (hours or minutes per flag).</summary>
+    /// <summary>
+    /// Parse "90m", "2h", "1h30m", "1h30", or a bare number (hours or minutes per
+    /// <paramref name="bareIsHours"/>). Digits trailing an hour unit are minutes, so "1h30" is 90.
+    /// Overflow-safe (accumulates in long) and capped at a week so a huge number can't overflow or
+    /// pause the control for years.
+    /// </summary>
     private static bool TryParseMinutes(string token, bool bareIsHours, out int minutes)
     {
         minutes = 0;
         var t = token.Trim().ToLowerInvariant();
         if (t.Length == 0) return false;
 
-        if (int.TryParse(t, NumberStyles.None, CultureInfo.InvariantCulture, out var bare))
-        {
-            minutes = bareIsHours ? bare * 60 : bare;
-            return true;
-        }
+        long total = 0;
+        bool any = false, sawHour = false;
+        var num = new StringBuilder();
 
-        int total = 0; var num = new StringBuilder(); var matched = false;
         foreach (var ch in t)
         {
             if (char.IsDigit(ch)) { num.Append(ch); continue; }
             if (num.Length == 0) return false;
-            var n = int.Parse(num.ToString(), CultureInfo.InvariantCulture);
-            if (ch == 'h' || ch == 'ч') { total += n * 60; matched = true; }
-            else if (ch == 'm' || ch == 'м') { total += n; matched = true; }
-            else return false;
+            if (!long.TryParse(num.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var n)) return false;
             num.Clear();
+            if (ch is 'h' or 'ч') { total += n * 60; sawHour = true; any = true; }
+            else if (ch is 'm' or 'м') { total += n; any = true; }
+            else return false;
         }
-        if (num.Length > 0) total += bareIsHours ? int.Parse(num.ToString()) * 60 : int.Parse(num.ToString());
-        minutes = total;
-        return matched || minutes > 0;
+
+        if (num.Length > 0)
+        {
+            if (!long.TryParse(num.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var tail)) return false;
+            // A trailing number after an explicit hour is the minutes part ("1h30"); otherwise it
+            // follows the bare-token convention (hours for /pause, minutes for /extra).
+            total += sawHour ? tail : (bareIsHours ? tail * 60 : tail);
+            any = true;
+        }
+
+        if (!any) return false;
+        total = Math.Clamp(total, 0, 7 * 24 * 60); // cap at a week; avoids int overflow and absurd values
+        minutes = (int)total;
+        return minutes > 0;
     }
 }

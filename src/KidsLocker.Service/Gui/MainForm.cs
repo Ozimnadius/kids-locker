@@ -344,13 +344,11 @@ public sealed class MainForm : Form
     {
         WithReloadRefresh(st =>
         {
-            var now = DateTime.Now;
-            var s = st.Load();
-            var latest = ScheduleEvaluator.AllowedFor(s, now).Select(r => r.To).DefaultIfEmpty(now.TimeOfDay).Max();
-            var start = now.TimeOfDay > latest ? now.TimeOfDay : latest;
-            var end = start + TimeSpan.FromHours(1);
-            if (end > TimeParsing.EndOfDay) end = TimeParsing.EndOfDay;
-            st.Update(x => x.Extras.Add(new DatedInterval(now.ToString("yyyy-MM-dd"), TimeParsing.Format(start), TimeParsing.Format(end))));
+            // Same shared helper as the Telegram /extra command, so both stay consistent and both
+            // skip the empty 24:00–24:00 interval when today is already allowed to midnight.
+            var extra = ScheduleEvaluator.BuildExtra(st.Load(), DateTime.Now, 60);
+            if (extra is not null)
+                st.Update(x => x.Extras.Add(extra));
         });
     }
 
