@@ -1,0 +1,81 @@
+# Релиз по тегу: git tag v1.2.0, затем git push origin v1.2.0.
+# Тесты → один самодостаточный KidsLocker.exe с версией из тега → GitHub Release
+# с exe, его SHA-256 и автосгенерированными заметками.
+# Тег с суффиксом (v1.2.0-rc.1) публикуется как пре-релиз.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # создать релиз и загрузить в него файлы
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  release:
+    name: Тесты, сборка и релиз
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      # Первым шагом: неподходящий тег отсекается до установки .NET.
+      - name: Версия из тега
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if (-not ($env:TAG -match '^v(\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?)$')) {
+            throw "Тег '$env:TAG' не похож на версию: нужен vX.Y.Z или vX.Y.Z-суффикс (например, v1.2.0 или v1.2.0-rc.1)"
+          }
+          "VERSION=$($Matches[1])" >> $env:GITHUB_ENV
+
+      - name: Получить код
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Установить .NET 8 SDK
+        id: dotnet
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+
+      # Как в ci.yml: без global.json dotnet взял бы самый новый SDK раннера.
+      - name: Зафиксировать SDK 8
+        run: echo '{"sdk":{"version":"${{ steps.dotnet.outputs.dotnet-version }}"}}' > global.json
+
+      # Только восстановление: кеш, сохранённый на теге, следующему тегу не виден.
+      # Берём кеш, который CI сохранил в main (ключ тот же), и ничего не сохраняем.
+      - name: Кеш NuGet (из CI)
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ steps.dotnet.outputs.dotnet-version }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Тесты
+        run: dotnet test tests/KidsLocker.Tests -c Release
+
+      # Single-file, self-contained и сжатие уже заданы в csproj.
+      - name: Сборка KidsLocker.exe
+        run: dotnet publish src/KidsLocker.Service/KidsLocker.Service.csproj -c Release -r win-x64 -o publish "-p:Version=$env:VERSION"
+
+      - name: Контрольная сумма SHA-256
+        working-directory: publish
+        run: |
+          $hash = (Get-FileHash KidsLocker.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          # Формат sha256sum: «<хеш>  <имя файла>»
+          Set-Content KidsLocker.exe.sha256 "$hash  KidsLocker.exe`n" -NoNewline -Encoding ascii
+          Get-Content KidsLocker.exe.sha256
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          $flags = @('--title', "KidsLocker $env:TAG", '--generate-notes', '--verify-tag')
+          if ($env:VERSION.Contains('-')) { $flags += '--prerelease' }
+          gh release create $env:TAG publish/KidsLocker.exe publish/KidsLocker.exe.sha256 @flags
