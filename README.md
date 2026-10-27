@@ -52,6 +52,8 @@ docs/                     SPEC, operations, hardening
 
 ## Разработка
 
+Нужен [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
+
 ```powershell
 dotnet build src\KidsLocker.Service
 dotnet test  tests\KidsLocker.Tests

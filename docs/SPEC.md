@@ -81,9 +81,9 @@
 
 ## Стек
 
-- **.NET 8 (C#)**, `Microsoft.Extensions.Hosting.WindowsServices` + **WinForms** (GUI).
+- **.NET 10 LTS (C#)**, `Microsoft.Extensions.Hosting.WindowsServices` + **WinForms** (GUI).
 - Публикация: **self-contained, single-file, compressed** под `win-x64` → один `.exe`
-  (~70 МБ), на ПК сына среда .NET не нужна.
+  (~50 МБ), на ПК сына среда .NET не нужна.
 - Telegram — прямые HTTPS-вызовы Bot API через `HttpClient` (без внешних зависимостей).
 
 ## Компоненты репозитория
