@@ -1,6 +1,4 @@
-using KidsLocker.Service.Config;
 using KidsLocker.Service.Enforcement;
-using KidsLocker.Service.Notifications;
 using KidsLocker.Service.Scheduling;
 using KidsLocker.Service.Telegram;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -32,8 +30,7 @@ public class CommandHandlerTests : IDisposable
 
     private static CommandHandler Make(ScheduleStore store, DateTime now)
     {
-        var notifier = new Notifier(NullLogger<Notifier>.Instance, new AppConfig(), null);
-        var enforcer = new Enforcer(NullLogger<Enforcer>.Instance, notifier, live: false);
+        var enforcer = new Enforcer(NullLogger<Enforcer>.Instance, live: false);
         return new CommandHandler(store, enforcer, () => now);
     }
 

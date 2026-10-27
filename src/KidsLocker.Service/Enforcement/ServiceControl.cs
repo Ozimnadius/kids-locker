@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.ServiceProcess;
 using KidsLocker.Service.Config;
@@ -6,9 +5,9 @@ using KidsLocker.Service.Config;
 namespace KidsLocker.Service.Enforcement;
 
 /// <summary>
-/// Helpers for inspecting and repairing the Windows service, used by the <c>--guard</c>
-/// self-healing mode. Recreation of a deleted service shells out to sc.exe (the service
-/// control APIs for creation are awkward to P/Invoke and sc.exe is always present).
+/// Помощники для проверки и починки службы Windows, используются режимом самовосстановления
+/// <c>--guard</c>. Пересоздание удалённой службы идёт через sc.exe (API управления службами для
+/// создания неудобно вызывать через P/Invoke, а sc.exe есть всегда).
 /// </summary>
 [SupportedOSPlatform("windows")]
 public static class ServiceControl
@@ -32,7 +31,7 @@ public static class ServiceControl
         }
         catch (InvalidOperationException)
         {
-            return State.Missing; // service not installed
+            return State.Missing; // служба не установлена
         }
         catch
         {
@@ -77,15 +76,15 @@ public static class ServiceControl
     }
 
     /// <summary>
-    /// Apply a change to a config/schedule file so the running service adopts it without
-    /// its tamper-detection firing: stop, write, start. If the service isn't running, just write.
+    /// Применить правку файла конфига/расписания так, чтобы работающая служба приняла её без
+    /// срабатывания детектора подмены: стоп, запись, старт. Если служба не запущена — просто запись.
     /// </summary>
     public static void ApplyWithReload(Action write)
     {
         var running = GetState() == State.Running;
         if (running)
         {
-            StopMarker.WriteExpected(); // this stop is ours — suppress the "control stopped" alert
+            StopMarker.WriteExpected(); // это наш стоп — подавляем алерт «контроль остановлен»
             TryStop();
         }
         write();
@@ -93,17 +92,17 @@ public static class ServiceControl
     }
 
     /// <summary>
-    /// Build the quoted <c>binPath=</c> value for sc.exe. The executable path contains spaces
-    /// (Program Files), so it must be wrapped in escaped inner quotes inside the outer quotes:
-    /// <c>"\"C:\…\KidsLocker.exe\" --dry-run"</c>. A single pair of quotes would be split by the
-    /// command-line parser (into "C:\Program" and "Files\…"), leaving the service with a broken path.
+    /// Собрать значение <c>binPath=</c> в кавычках для sc.exe. Путь к exe содержит пробелы
+    /// (Program Files), поэтому его нужно обернуть экранированными внутренними кавычками внутри
+    /// внешних: <c>"\"C:\…\KidsLocker.exe\" --dry-run"</c>. Одна пара кавычек была бы разбита
+    /// разборщиком командной строки (на "C:\Program" и "Files\…"), оставив службе битый путь.
     /// </summary>
     public static string BuildBinPath(string exe, bool dryRun) =>
         dryRun ? $"\"\\\"{exe}\\\" --dry-run\"" : $"\"\\\"{exe}\\\"\"";
 
-    /// <summary>Recreate the service pointing at this same executable, with auto-start and recovery.
-    /// Re-creates it in the ORIGINAL install mode (dry-run vs live) recorded by the installer, so a
-    /// test install revived by the guardian does not silently start forcing real shutdowns.</summary>
+    /// <summary>Пересоздать службу, указывающую на этот же exe, с автозапуском и авто-восстановлением.
+    /// Воссоздаёт её в ИСХОДНОМ режиме установки (тест или бой), записанном установщиком, чтобы
+    /// тестовую установку, воскрешённую хранителем, не начало молча выключать ПК по-настоящему.</summary>
     public static bool TryRecreate()
     {
         var exe = Environment.ProcessPath;
@@ -119,43 +118,22 @@ public static class ServiceControl
     }
 
     /// <summary>
-    /// Read the install mode the installer recorded. If the marker is missing or unreadable we
-    /// default to dry-run: an unattended re-create of a service whose mode we cannot confirm must
-    /// NOT start powering the machine off on its own (the guardian also alerts the parent that it
-    /// re-created the service, so a genuine live install can be re-applied knowingly).
+    /// Прочитать режим установки, записанный установщиком. Если маркер отсутствует или не читается,
+    /// считаем режимом по умолчанию тест (dry-run): автоматическое пересоздание службы, режим которой
+    /// мы не можем подтвердить, НЕ должно само начать выключать ПК (хранитель к тому же шлёт родителю
+    /// алерт о пересоздании службы, так что настоящую боевую установку можно применить заново осознанно).
+    /// Метод публичный: тем же маркером пользуется кнопка «Выключить сейчас» в пульте, чтобы в тесте не гасить ПК.
     /// </summary>
-    private static bool InstalledDryRun()
+    public static bool InstalledDryRun()
     {
         try
         {
             if (File.Exists(AppPaths.ServiceModeFile))
                 return !string.Equals(File.ReadAllText(AppPaths.ServiceModeFile).Trim(), "live", StringComparison.OrdinalIgnoreCase);
         }
-        catch { /* fall through to the safe default */ }
+        catch { /* ушли к безопасному значению по умолчанию */ }
         return true;
     }
 
-    private static bool RunSc(string arguments)
-    {
-        try
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = "sc.exe",
-                Arguments = arguments,
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
-            using var p = Process.Start(psi);
-            if (p is null) return false;
-            p.WaitForExit(20000);
-            return p.ExitCode == 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    private static bool RunSc(string arguments) => ProcessRunner.Run("sc.exe", arguments, 20000).code == 0;
 }

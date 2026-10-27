@@ -1,22 +1,46 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
 namespace KidsLocker.Service.Enforcement;
 
 /// <summary>
-/// P/Invoke fallback that initiates a forced shutdown directly, used if launching
-/// shutdown.exe ever fails. Enables SeShutdownPrivilege on the current process token
-/// (available to the LocalSystem service account) then calls InitiateSystemShutdownEx.
+/// Принудительное выключение ПК: сначала запуск shutdown.exe, а если он не стартует —
+/// прямой P/Invoke как запасной путь. P/Invoke включает SeShutdownPrivilege у токена текущего
+/// процесса (есть у аккаунта LocalSystem и у администратора) и зовёт InitiateSystemShutdownEx.
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal static class NativeShutdown
 {
+    /// <summary>Немедленно и принудительно выключить ПК: сначала shutdown.exe, при неудаче его
+    /// запуска — запасной P/Invoke. Общий путь выключения для службы (Enforcer) и кнопки
+    /// «Выключить сейчас» в пульте, чтобы не дублировать вызов shutdown.exe в двух местах.</summary>
+    public static void Force(string comment)
+    {
+        try
+        {
+            // /s — выключение, /f — принудительно закрыть приложения, /t 0 — немедленно, /c — комментарий.
+            var psi = new ProcessStartInfo
+            {
+                FileName = "shutdown.exe",
+                Arguments = $"/s /f /t 0 /c \"{comment}\"",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+            };
+            Process.Start(psi);
+        }
+        catch
+        {
+            TryForce();
+        }
+    }
+
     public static bool TryForce()
     {
         try
         {
             EnableShutdownPrivilege();
-            // machineName null = local, message null, timeout 0, force apps closed, no reboot.
+            // machineName null = локально, message null, таймаут 0, закрыть приложения принудительно, без перезагрузки.
             return InitiateSystemShutdownEx(null, null, 0, bForceAppsClosed: true, bRebootAfterShutdown: false, dwReason: 0);
         }
         catch
