@@ -24,7 +24,8 @@
 
 ## Быстрый старт
 
-1. Собрать: `powershell -ExecutionPolicy Bypass -File install\Publish.ps1` → `publish\KidsLocker.exe`.
+1. Собрать: `powershell -ExecutionPolicy Bypass -File install\Publish.ps1` → `publish\KidsLocker.exe`
+   (или скачать готовый — см. [Релиз](#релиз)).
 2. Скопировать `KidsLocker.exe` на ПК сына, запустить, задать мастер-пароль.
 3. Вкладка Telegram: токен → «Определить автоматически» → «Проверить связь» → «Сохранить».
 4. Вкладка Расписание: задать часы → «Сохранить расписание».
@@ -46,6 +47,7 @@ src/KidsLocker.Service/   единый exe: GUI (Gui/), служба (движо
 tests/KidsLocker.Tests/   юнит-тесты (расписание, парсинг, пароль)
 install/Publish.ps1       сборка одного самодостаточного exe
 docs/                     SPEC, operations, hardening
+.github/workflows/        CI (тесты) и авторелиз по тегу
 ```
 
 ## Разработка
@@ -58,3 +60,26 @@ dotnet test  tests\KidsLocker.Tests
 Режимы exe: без аргументов (интерактивно) → GUI; как служба → движок; служебные флаги
 `--enforce-once [--live]`, `--guard`, `--test-telegram`, `--telegram-updates`,
 `--install-eventsource`, `--console`. Установку/удаление делает GUI (в C#, класс `Setup/Installer`).
+
+## Релиз
+
+Готовый `KidsLocker.exe` — на странице [релизов](https://github.com/Ozimnadius/kids-locker/releases):
+у каждой версии есть сам exe и `KidsLocker.exe.sha256` с его контрольной суммой.
+
+Выпустить версию `X.Y.Z` — на актуальном `main` поставить тег и отправить его на GitHub:
+
+```powershell
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+GitHub Actions ([release.yml](.github/workflows/release.yml)) прогонит тесты, соберёт exe с
+версией из тега и создаст релиз с автоматическими заметками. Тег с суффиксом
+(`vX.Y.Z-rc.1`) станет пре-релизом. Тесты на каждый PR и push в `main` гоняет
+[ci.yml](.github/workflows/ci.yml).
+
+Проверить скачанный exe (должно вывести `True`):
+
+```powershell
+(Get-FileHash KidsLocker.exe).Hash -eq (Get-Content KidsLocker.exe.sha256).Split(' ')[0]
+```

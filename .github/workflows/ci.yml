@@ -1,0 +1,58 @@
+# Сборка и юнит-тесты на каждый push в main и на каждый PR в main.
+# Правки только в .md не гоняют раннер.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  pull_request:
+    branches: [main]
+    paths-ignore: ['**.md']
+
+# Новый push в PR отменяет его устаревший прогон: минуты Windows-раннера
+# в приватном репозитории списываются вдвойне.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  test:
+    name: Тесты
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Получить код
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Установить .NET 8 SDK
+        id: dotnet
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+
+      # На раннере предустановлены и более новые SDK (9, 10). Без global.json
+      # dotnet взял бы самый новый, а при LangVersion=latest это другой C#.
+      - name: Зафиксировать SDK 8
+        run: echo '{"sdk":{"version":"${{ steps.dotnet.outputs.dotnet-version }}"}}' > global.json
+
+      # Ключ — версия SDK и csproj: от них зависит набор пакетов,
+      # включая runtime packs для self-contained сборки.
+      - name: Кеш NuGet
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ steps.dotnet.outputs.dotnet-version }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Тесты
+        run: dotnet test tests/KidsLocker.Tests -c Release
