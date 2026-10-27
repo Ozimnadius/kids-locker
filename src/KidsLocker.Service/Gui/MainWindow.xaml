@@ -1,0 +1,66 @@
+<Window x:Class="KidsLocker.Service.Gui.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="KidsLocker" Width="960" Height="660" MinWidth="800" MinHeight="500" FontSize="14"
+        WindowStartupLocation="CenterScreen">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="232" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Меню слева -->
+        <DockPanel Margin="8,8,4,16">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="12,8,0,16">
+                <Border Width="28" Height="28" CornerRadius="6" Background="{DynamicResource AccentFillColorDefaultBrush}">
+                    <TextBlock Style="{StaticResource Icon}" Text="&#xE72E;" FontSize="14" HorizontalAlignment="Center"
+                               Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+                </Border>
+                <TextBlock Text="KidsLocker" Margin="10,0,0,0" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="14,0,0,0">
+                <Ellipse x:Name="ServiceDot" Width="8" Height="8" VerticalAlignment="Center" />
+                <TextBlock x:Name="ServiceLine" Style="{StaticResource Hint}" Margin="8,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <ListBox x:Name="Nav" ItemContainerStyle="{StaticResource NavItem}" SelectionChanged="OnNavigate"
+                     Background="Transparent" BorderThickness="0" Padding="0"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Разделы">
+                <ListBoxItem Tag="telegram" AutomationProperties.Name="Telegram">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE724;" />
+                        <TextBlock Text="Telegram" Margin="14,0,0,0" />
+                    </StackPanel>
+                </ListBoxItem>
+                <ListBoxItem Tag="service" AutomationProperties.Name="Служба">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xEA18;" />
+                        <TextBlock Text="Служба" Margin="14,0,0,0" />
+                    </StackPanel>
+                </ListBoxItem>
+                <ListBoxItem Tag="schedule" AutomationProperties.Name="Расписание">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE787;" />
+                        <TextBlock Text="Расписание" Margin="14,0,0,0" />
+                    </StackPanel>
+                </ListBoxItem>
+            </ListBox>
+        </DockPanel>
+
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- Индикатор фоновой работы. Место под него занято всегда, чтобы страница не прыгала. -->
+            <StackPanel x:Name="BusyPanel" Margin="28,10,28,0" Visibility="Hidden">
+                <TextBlock x:Name="BusyText" Style="{StaticResource Hint}" Text=" " />
+                <ProgressBar x:Name="BusyBar" Margin="0,6,0,0" />
+            </StackPanel>
+
+            <ContentControl x:Name="PageHost" Grid.Row="1" Focusable="False" />
+        </Grid>
+    </Grid>
+</Window>

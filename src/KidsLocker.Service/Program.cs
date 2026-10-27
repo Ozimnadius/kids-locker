@@ -39,20 +39,8 @@ internal static class Program
         return RunGui();
     }
 
-    private static int RunGui()
-    {
-        ApplicationConfiguration.Initialize();
-        var config = AppConfig.Load();
-
-        using (var gate = new LoginForm(config))
-        {
-            if (gate.ShowDialog() != DialogResult.OK)
-                return 0; // cancelled or wrong password
-        }
-
-        Application.Run(new MainForm());
-        return 0;
-    }
+    // WPF загружается только здесь: службе и служебным флагам пульт не нужен.
+    private static int RunGui() => GuiApp.Run();
 
     private static void RunHost(string[] a)
     {
