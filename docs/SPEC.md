@@ -91,7 +91,7 @@
 - **.NET 10 LTS (C#)**, `Microsoft.Extensions.Hosting.WindowsServices` + **WPF** со встроенной
   темой Fluent (GUI).
 - Публикация: **self-contained, single-file, compressed** под `win-x64` → один `.exe`
-  (~50 МБ), на ПК сына среда .NET не нужна.
+  (~63 МБ вместе со сборками WPF), на ПК сына среда .NET не нужна.
 - Telegram — прямые HTTPS-вызовы Bot API через `HttpClient` (без внешних зависимостей).
 
 ## Компоненты репозитория
