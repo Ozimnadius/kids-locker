@@ -43,7 +43,7 @@ jobs:
           dotnet-version: 10.0.x
 
       # Как в ci.yml: без global.json dotnet взял бы самый новый SDK раннера.
-      - name: Зафиксировать SDK 10
+      - name: Зафиксировать версию SDK
         run: echo '{"sdk":{"version":"${{ steps.dotnet.outputs.dotnet-version }}"}}' > global.json
 
       # Только восстановление: кеш, сохранённый на теге, следующему тегу не виден.

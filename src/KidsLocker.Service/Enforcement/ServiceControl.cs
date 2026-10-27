@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.ServiceProcess;
+using KidsLocker.Service.Config;
 
 namespace KidsLocker.Service.Enforcement;
 
@@ -91,17 +92,47 @@ public static class ServiceControl
         if (running) TryStart();
     }
 
-    /// <summary>Recreate the service pointing at this same executable, with auto-start and recovery.</summary>
+    /// <summary>
+    /// Build the quoted <c>binPath=</c> value for sc.exe. The executable path contains spaces
+    /// (Program Files), so it must be wrapped in escaped inner quotes inside the outer quotes:
+    /// <c>"\"C:\…\KidsLocker.exe\" --dry-run"</c>. A single pair of quotes would be split by the
+    /// command-line parser (into "C:\Program" and "Files\…"), leaving the service with a broken path.
+    /// </summary>
+    public static string BuildBinPath(string exe, bool dryRun) =>
+        dryRun ? $"\"\\\"{exe}\\\" --dry-run\"" : $"\"\\\"{exe}\\\"\"";
+
+    /// <summary>Recreate the service pointing at this same executable, with auto-start and recovery.
+    /// Re-creates it in the ORIGINAL install mode (dry-run vs live) recorded by the installer, so a
+    /// test install revived by the guardian does not silently start forcing real shutdowns.</summary>
     public static bool TryRecreate()
     {
         var exe = Environment.ProcessPath;
         if (string.IsNullOrEmpty(exe)) return false;
 
-        var okCreate = RunSc($"create {ServiceName} binPath= \"{exe}\" start= auto obj= LocalSystem DisplayName= KidsLocker");
+        var dryRun = InstalledDryRun();
+        var okCreate = RunSc($"create {ServiceName} binPath= {BuildBinPath(exe, dryRun)} start= auto obj= LocalSystem DisplayName= KidsLocker");
+        RunSc($"description {ServiceName} \"KidsLocker parental time control\"");
         RunSc($"failure {ServiceName} reset= 86400 actions= restart/5000/restart/5000/restart/5000");
         RunSc($"failureflag {ServiceName} 1");
         var okStart = RunSc($"start {ServiceName}");
         return okCreate || okStart;
+    }
+
+    /// <summary>
+    /// Read the install mode the installer recorded. If the marker is missing or unreadable we
+    /// default to dry-run: an unattended re-create of a service whose mode we cannot confirm must
+    /// NOT start powering the machine off on its own (the guardian also alerts the parent that it
+    /// re-created the service, so a genuine live install can be re-applied knowingly).
+    /// </summary>
+    private static bool InstalledDryRun()
+    {
+        try
+        {
+            if (File.Exists(AppPaths.ServiceModeFile))
+                return !string.Equals(File.ReadAllText(AppPaths.ServiceModeFile).Trim(), "live", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { /* fall through to the safe default */ }
+        return true;
     }
 
     private static bool RunSc(string arguments)

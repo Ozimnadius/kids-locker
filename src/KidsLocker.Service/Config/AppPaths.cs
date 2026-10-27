@@ -21,6 +21,10 @@ public static class AppPaths
     /// service's stop-alert can tell an app-initiated restart from someone killing it.</summary>
     public static string ExpectedStopFile => Path.Combine(RootDir, ".expected_stop");
 
+    /// <summary>Records whether the service was installed in dry-run or live mode, so the
+    /// guardian can re-create a deleted service in the SAME mode instead of defaulting to live.</summary>
+    public static string ServiceModeFile => Path.Combine(RootDir, ".service_mode");
+
     public static void EnsureRoot()
     {
         Directory.CreateDirectory(RootDir);
