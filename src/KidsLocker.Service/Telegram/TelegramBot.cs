@@ -34,7 +34,8 @@ public sealed class TelegramBot : BackgroundService
         // A real long poll must sit on the server a while; a 0/short timeout against a failing
         // endpoint is what turns the loop hot, so hold it at a sane minimum.
         var pollSeconds = Math.Clamp(_config.TelegramLongPollSeconds, 20, 90);
-        long offset = 0;
+        var startedUtc = DateTimeOffset.UtcNow;
+        long offset = LoadOffset();
         var failures = 0;
 
         while (!stoppingToken.IsCancellationRequested)
@@ -60,6 +61,9 @@ public sealed class TelegramBot : BackgroundService
                 foreach (var u in poll.Updates)
                 {
                     offset = Math.Max(offset, u.UpdateId + 1);
+                    SaveOffset(offset); // persist BEFORE acting, so a restart (or a /shutdown that kills us) can't replay it
+                    if (IsStale(u.Message, startedUtc))
+                        continue; // a command that piled up while the PC was off — don't act on it now
                     await Dispatch(u, stoppingToken);
                 }
             }
@@ -100,5 +104,35 @@ public sealed class TelegramBot : BackgroundService
         }
 
         await _client.SendMessageAsync(msg.Chat.Id, reply, ct);
+    }
+
+    private static long LoadOffset()
+    {
+        try
+        {
+            if (File.Exists(AppPaths.TelegramOffsetFile)
+                && long.TryParse(File.ReadAllText(AppPaths.TelegramOffsetFile).Trim(), out var v) && v > 0)
+                return v;
+        }
+        catch { /* best effort — fall back to 0 */ }
+        return 0;
+    }
+
+    private static void SaveOffset(long offset)
+    {
+        try
+        {
+            AppPaths.EnsureRoot();
+            File.WriteAllText(AppPaths.TelegramOffsetFile, offset.ToString());
+        }
+        catch { /* best effort */ }
+    }
+
+    /// <summary>A message sent well before the bot started (PC was off/offline) must not be acted on
+    /// now — e.g. a bedtime /shutdown should not power the machine off the next morning.</summary>
+    private static bool IsStale(TgMessage? msg, DateTimeOffset startedUtc)
+    {
+        if (msg is null || msg.Date <= 0) return false;
+        return DateTimeOffset.FromUnixTimeSeconds(msg.Date) < startedUtc - TimeSpan.FromMinutes(5);
     }
 }

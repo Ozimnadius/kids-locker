@@ -70,4 +70,18 @@ public class ScheduleStoreTamperTests : IDisposable
         Assert.True(store.SyncAndDetectTamper());
         Assert.True(File.Exists(ScheduleFile));
     }
+
+    [Fact]
+    public void CorruptFile_BlocksEverything_AndIsNotOverwritten()
+    {
+        File.WriteAllText(ScheduleFile, "{ broken json ");
+        var store = new ScheduleStore();
+
+        var s = store.Get();
+        Assert.True(store.ScheduleFileCorrupt);
+        // Blocked all day rather than relaxed to the permissive default.
+        Assert.True(ScheduleEvaluator.IsBlocked(s, new DateTime(2024, 1, 1, 12, 0, 0)));
+        // The corrupt file is preserved (recoverable), not replaced with a default schedule.
+        Assert.Equal("{ broken json ", File.ReadAllText(ScheduleFile));
+    }
 }

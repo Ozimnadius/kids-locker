@@ -24,6 +24,10 @@ public sealed class ScheduleStore
     private string _lastHash = "";
     private string _lastAlertedTamperHash = "";
 
+    /// <summary>True when the last load found the schedule file present but unreadable/corrupt and
+    /// fell back to blocking everything. The enforcement worker surfaces this to the parent.</summary>
+    public bool ScheduleFileCorrupt { get; private set; }
+
     /// <summary>A defensive copy of the current schedule (safe to read/enumerate freely).</summary>
     public Schedule Get()
     {
@@ -107,9 +111,10 @@ public sealed class ScheduleStore
     private void EnsureLoaded()
     {
         if (_current is not null) return;
-        try
+
+        if (File.Exists(AppPaths.ScheduleFile))
         {
-            if (File.Exists(AppPaths.ScheduleFile))
+            try
             {
                 var json = File.ReadAllText(AppPaths.ScheduleFile);
                 var s = JsonSerializer.Deserialize<Schedule>(json, JsonOpts);
@@ -120,17 +125,34 @@ public sealed class ScheduleStore
                     s.Extras ??= new();
                     _current = s;
                     _lastHash = Hash(json); // baseline = actual disk content
+                    ScheduleFileCorrupt = false;
                     return;
                 }
             }
+            catch
+            {
+                // fall through to the fail-safe below
+            }
+
+            // The file exists but is unreadable/corrupt. Fail safe to BLOCKING EVERYTHING — never the
+            // permissive default, which would silently relax enforcement — and do NOT overwrite the
+            // file: the real schedule may be recoverable, and overwriting would destroy it.
+            _current = BlockedAll();
+            ScheduleFileCorrupt = true;
+            try { _lastHash = File.Exists(AppPaths.ScheduleFile) ? Hash(File.ReadAllText(AppPaths.ScheduleFile)) : ""; }
+            catch { _lastHash = ""; }
+            return;
         }
-        catch
-        {
-            // Corrupt file → fail safe to the default (which blocks at night).
-        }
+
+        // First run, no file yet: start from the sensible default and persist it.
         _current = Schedule.Default();
+        ScheduleFileCorrupt = false;
         WriteToDisk(_current);
     }
+
+    /// <summary>A schedule that blocks the whole day (Enabled, no allowed intervals) — the fail-safe
+    /// used when the on-disk schedule can't be read, so a corrupt file never relaxes enforcement.</summary>
+    private static Schedule BlockedAll() => new() { Enabled = true };
 
     private void WriteToDisk(Schedule s)
     {
