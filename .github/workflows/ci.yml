@@ -11,9 +11,11 @@ on:
     paths-ignore: ['**.md']
 
 # Новый push в PR отменяет его устаревший прогон: минуты Windows-раннера
-# в приватном репозитории списываются вдвойне.
+# в приватном репозитории списываются вдвойне. Группа PR — по его номеру:
+# у уже смёрженного PR github.ref указывает на main, и прогон PR отменил бы
+# прогон main.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
