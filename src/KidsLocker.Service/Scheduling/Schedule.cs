@@ -1,34 +1,34 @@
 namespace KidsLocker.Service.Scheduling;
 
 /// <summary>
-/// The allowed-time schedule. Anything OUTSIDE the allowed intervals for the current
-/// day is a blocked (bedtime) window during which the PC is shut down.
+/// Расписание разрешённого времени. Всё, что ВНЕ разрешённых интервалов текущего дня, —
+/// запрещённое время (время сна), в которое ПК выключается.
 /// </summary>
 public sealed class Schedule
 {
-    /// <summary>Master switch. When false, enforcement is off entirely.</summary>
+    /// <summary>Главный выключатель. Если false, контроль полностью выключен.</summary>
     public bool Enabled { get; set; } = true;
 
     /// <summary>
-    /// Allowed intervals per weekday. Keys are "sun","mon","tue","wed","thu","fri","sat"
-    /// (matching <see cref="DayOfWeek"/> order). A missing/empty day means blocked all day.
+    /// Разрешённые интервалы по дням недели. Ключи — "sun","mon","tue","wed","thu","fri","sat"
+    /// (в порядке <see cref="DayOfWeek"/>). Отсутствующий или пустой день означает запрет на весь день.
     /// </summary>
     public Dictionary<string, List<Interval>> Allowed { get; set; } = new();
 
-    /// <summary>One-off extra allowed intervals for a specific date (e.g. "+1 hour tonight").</summary>
+    /// <summary>Разовые дополнительные разрешённые интервалы на конкретную дату (например, «+1 час сегодня вечером»).</summary>
     public List<DatedInterval> Extras { get; set; } = new();
 
-    /// <summary>When set and now &lt; this local time, enforcement is paused (all allowed).</summary>
+    /// <summary>Если задано и сейчас &lt; этого локального времени, контроль на паузе (всё разрешено).</summary>
     public DateTime? PauseUntil { get; set; }
 
-    /// <summary>Last seen local time-zone id; used to detect tampering with the clock zone.</summary>
+    /// <summary>Последний замеченный id локального часового пояса; нужен, чтобы заметить подмену часового пояса.</summary>
     public string? LastTimeZoneId { get; set; }
 
     public static readonly string[] DayKeys = { "sun", "mon", "tue", "wed", "thu", "fri", "sat" };
 
     public static string KeyFor(DayOfWeek d) => DayKeys[(int)d];
 
-    /// <summary>A sensible starting schedule: allowed 07:00–23:00 on school nights, later on weekends.</summary>
+    /// <summary>Разумное начальное расписание: 07:00–23:00 перед учебными днями, в выходные — дольше.</summary>
     public static Schedule Default()
     {
         var s = new Schedule();
@@ -41,7 +41,7 @@ public sealed class Schedule
     }
 }
 
-/// <summary>A within-day interval [From, To). Times are "HH:mm"; "24:00" means end of day.</summary>
+/// <summary>Интервал внутри дня [From, To). Время в формате "HH:mm"; "24:00" означает конец дня.</summary>
 public sealed class Interval
 {
     public string From { get; set; } = "00:00";
@@ -51,7 +51,7 @@ public sealed class Interval
     public Interval(string from, string to) { From = from; To = to; }
 }
 
-/// <summary>An extra allowed interval scoped to a single calendar date ("yyyy-MM-dd").</summary>
+/// <summary>Дополнительный разрешённый интервал, привязанный к одной календарной дате ("yyyy-MM-dd").</summary>
 public sealed class DatedInterval
 {
     public string Date { get; set; } = "";

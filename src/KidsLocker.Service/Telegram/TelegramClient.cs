@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 
 namespace KidsLocker.Service.Telegram;
 
-/// <summary>A single incoming Telegram update (only the fields we use).</summary>
+/// <summary>Одно входящее обновление Telegram (только используемые нами поля).</summary>
 public sealed class TgUpdate
 {
     [JsonPropertyName("update_id")] public long UpdateId { get; set; }
@@ -14,7 +14,7 @@ public sealed class TgUpdate
 public sealed class TgMessage
 {
     [JsonPropertyName("message_id")] public long MessageId { get; set; }
-    [JsonPropertyName("date")] public long Date { get; set; } // unix seconds when the message was sent
+    [JsonPropertyName("date")] public long Date { get; set; } // момент отправки сообщения в секундах unix-времени
     [JsonPropertyName("chat")] public TgChat? Chat { get; set; }
     [JsonPropertyName("text")] public string? Text { get; set; }
 }
@@ -31,8 +31,8 @@ public sealed class TgChat
 }
 
 /// <summary>
-/// Minimal Telegram Bot API client over HttpClient — no third-party dependency, so the
-/// self-contained exe stays small and auditable. Long-polls getUpdates and sends messages.
+/// Минимальный клиент Telegram Bot API поверх HttpClient — без сторонних зависимостей, чтобы
+/// самодостаточный exe оставался небольшим и проверяемым. Долгим опросом вызывает getUpdates и отправляет сообщения.
 /// </summary>
 public sealed class TelegramClient
 {
@@ -56,7 +56,7 @@ public sealed class TelegramClient
         return ok;
     }
 
-    /// <summary>Send a message and, on failure, return Telegram's error description (for the test command).</summary>
+    /// <summary>Отправить сообщение и при неудаче вернуть описание ошибки от Telegram (для тестовой команды).</summary>
     public async Task<(bool ok, string detail)> SendMessageResultAsync(long chatId, string text, CancellationToken ct)
     {
         try
@@ -73,7 +73,7 @@ public sealed class TelegramClient
         }
     }
 
-    /// <summary>Verify the token via getMe. Returns the bot's @username, or null if the token is bad.</summary>
+    /// <summary>Проверить токен через getMe. Возвращает @username бота или null, если токен неверный.</summary>
     public async Task<string?> GetMeAsync(CancellationToken ct)
     {
         try
@@ -109,16 +109,16 @@ public sealed class TelegramClient
     }
 
     /// <summary>
-    /// Result of a long-poll: the updates, plus whether the call FAILED (network/HTTP error) as
-    /// opposed to simply returning no updates. The bot loop uses <see cref="Failed"/> to back off
-    /// instead of hammering the API when the token is bad, a second poller is active (409), etc.
+    /// Результат долгого опроса: обновления плюс признак того, что вызов НЕ УДАЛСЯ (ошибка сети/HTTP),
+    /// в отличие от случая, когда обновлений просто нет. Цикл бота по <see cref="Failed"/> отступает,
+    /// а не долбит API, когда токен неверный, работает второй опрашивающий (409) и т. п.
     /// </summary>
     public readonly record struct UpdatesPoll(List<TgUpdate> Updates, bool Failed);
 
     /// <summary>
-    /// Long-poll for updates newer than <paramref name="offset"/>. Distinguishes "no updates" from
-    /// "the call failed" so the caller can pace itself. Caller advances the offset past the highest
-    /// UpdateId. Never throws except on cancellation.
+    /// Долгий опрос обновлений новее <paramref name="offset"/>. Отличает «обновлений нет» от
+    /// «вызов не удался», чтобы вызывающий мог регулировать темп. Вызывающий сам сдвигает offset за
+    /// наибольший UpdateId. Исключений не бросает, кроме как при отмене.
     /// </summary>
     public async Task<UpdatesPoll> PollUpdatesAsync(long offset, int timeoutSec, CancellationToken ct)
     {
@@ -152,9 +152,9 @@ public sealed class TelegramClient
     }
 
     /// <summary>
-    /// One-shot convenience for the GUI/CLI (token check, chat-id detection): returns just the
-    /// updates and treats any failure as "no updates". Not for the long-poll loop — that uses
-    /// <see cref="PollUpdatesAsync"/> so it can tell failure from emptiness and back off.
+    /// Разовый удобный вызов для пульта/CLI (проверка токена, определение id чата): возвращает только
+    /// обновления и считает любой сбой случаем «обновлений нет». Не для цикла долгого опроса — тот
+    /// использует <see cref="PollUpdatesAsync"/>, чтобы отличать сбой от пустоты и отступать.
     /// </summary>
     public async Task<List<TgUpdate>> GetUpdatesAsync(long offset, int timeoutSec, CancellationToken ct)
         => (await PollUpdatesAsync(offset, timeoutSec, ct)).Updates;

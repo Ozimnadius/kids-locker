@@ -5,9 +5,9 @@ using Microsoft.Extensions.Logging;
 namespace KidsLocker.Service.Notifications;
 
 /// <summary>
-/// Central place for user-facing events. Every alert goes to three sinks:
-/// the app log (via ILogger), the Windows Event Log, and the parent's Telegram.
-/// A failure in any one sink never blocks the others.
+/// Единая точка для событий, видимых пользователю. Каждый алерт уходит в три приёмника:
+/// лог приложения (через ILogger), журнал событий Windows и Telegram родителя.
+/// Сбой одного приёмника никогда не мешает остальным.
 /// </summary>
 public sealed class Notifier
 {
@@ -24,7 +24,7 @@ public sealed class Notifier
 
     public void Info(string message) => _log.LogInformation("{Message}", message);
 
-    /// <summary>Fire-and-forget alert for the long-running worker (does not block the loop).</summary>
+    /// <summary>Алерт «отправил и забыл» для долгоживущего цикла (не блокирует цикл).</summary>
     public void Alert(string message)
     {
         LogLocally(message);
@@ -32,8 +32,8 @@ public sealed class Notifier
     }
 
     /// <summary>
-    /// Awaitable alert for short-lived modes (enforce-once, guard) that must finish sending
-    /// before the process exits or the machine powers off.
+    /// Алерт с ожиданием для короткоживущих режимов (enforce-once, guard), которым нужно
+    /// закончить отправку до выхода процесса или выключения машины.
     /// </summary>
     public async Task AlertAsync(string message, CancellationToken ct = default)
     {

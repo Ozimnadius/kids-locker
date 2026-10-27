@@ -2,7 +2,7 @@
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
   <assemblyIdentity version="1.0.0.0" name="KidsLocker.app" />
 
-  <!-- The admin GUI needs elevation to install the service, write to ProgramData and set ACLs. -->
+  <!-- Административному пульту нужны повышенные права, чтобы установить службу, писать в ProgramData и задавать ACL. -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>

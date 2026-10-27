@@ -7,9 +7,9 @@ using KidsLocker.Service.Scheduling;
 namespace KidsLocker.Service.Telegram;
 
 /// <summary>
-/// Parses and executes the parent's Telegram commands against the schedule. Pure-ish:
-/// the only side effects are schedule writes and (for /shutdown) the Enforcer. Returns the
-/// reply text. Kept free of Telegram I/O so it can be unit-tested directly.
+/// Разбирает и выполняет команды родителя из Telegram над расписанием. Почти без побочных
+/// эффектов: единственные из них — запись расписания и (для /shutdown) Enforcer. Возвращает
+/// текст ответа. Не занимается вводом-выводом Telegram, чтобы его можно было тестировать напрямую.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class CommandHandler
@@ -118,9 +118,9 @@ public sealed class CommandHandler
         var days = ResolveDays(args[0]);
         if (days.Count == 0) return $"Не понял день «{args[0]}». Дни: пн вт ср чт пт сб вс, будни, выходные, все.";
 
-        // Everything after the day is the spec. Telegram splits the command on spaces, so a spec
-        // like "07:00-12:00, 14:00-23:00" (exactly how /schedule and the GUI print it) arrives as
-        // several args — join them back, or the second interval is silently dropped.
+        // Всё, что после дня, — это описание интервалов. Команда делится по пробелам, поэтому описание
+        // вида "07:00-12:00, 14:00-23:00" (именно так его печатают /schedule и пульт) приходит
+        // несколькими аргументами — склеиваем их обратно, иначе второй интервал молча потеряется.
         var spec = string.Join(" ", args.Skip(1));
         var clear = spec.Equals("off", StringComparison.OrdinalIgnoreCase)
                     || spec.Equals("нет", StringComparison.OrdinalIgnoreCase)
@@ -192,7 +192,7 @@ public sealed class CommandHandler
         "/off — выключить контроль, /on — включить\n" +
         "/shutdown — выключить компьютер сейчас";
 
-    // --- parsing helpers ---
+    // --- помощники разбора ---
 
     private static List<string> ResolveDays(string token)
     {
@@ -218,10 +218,10 @@ public sealed class CommandHandler
     }
 
     /// <summary>
-    /// Parse "90m", "2h", "1h30m", "1h30", or a bare number (hours or minutes per
-    /// <paramref name="bareIsHours"/>). Digits trailing an hour unit are minutes, so "1h30" is 90.
-    /// Overflow-safe (accumulates in long) and capped at a week so a huge number can't overflow or
-    /// pause the control for years.
+    /// Разобрать "90m", "2h", "1h30m", "1h30" или голое число (часы или минуты — по
+    /// <paramref name="bareIsHours"/>). Цифры после единицы «час» — это минуты, так что "1h30" — это 90.
+    /// Защищено от переполнения (сумма копится в long) и ограничено неделей, чтобы огромное число не
+    /// вызвало переполнение и не поставило контроль на паузу на годы.
     /// </summary>
     private static bool TryParseMinutes(string token, bool bareIsHours, out int minutes)
     {
@@ -247,14 +247,14 @@ public sealed class CommandHandler
         if (num.Length > 0)
         {
             if (!long.TryParse(num.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var tail)) return false;
-            // A trailing number after an explicit hour is the minutes part ("1h30"); otherwise it
-            // follows the bare-token convention (hours for /pause, minutes for /extra).
+            // Число в конце после явно указанных часов — это минуты ("1h30"); иначе действует правило
+            // для голого числа (часы для /pause, минуты для /extra).
             total += sawHour ? tail : (bareIsHours ? tail * 60 : tail);
             any = true;
         }
 
         if (!any) return false;
-        total = Math.Clamp(total, 0, 7 * 24 * 60); // cap at a week; avoids int overflow and absurd values
+        total = Math.Clamp(total, 0, 7 * 24 * 60); // не больше недели; защищает от переполнения int и абсурдных значений
         minutes = (int)total;
         return minutes > 0;
     }

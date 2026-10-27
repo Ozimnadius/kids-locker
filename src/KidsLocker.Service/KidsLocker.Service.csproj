@@ -8,13 +8,13 @@
     <AssemblyName>KidsLocker</AssemblyName>
     <LangVersion>latest</LangVersion>
 
-    <!-- One app: double-click opens the GUI; the same exe also runs as the service. -->
+    <!-- Одно приложение: двойной щелчок открывает пульт; тот же exe работает и как служба. -->
     <OutputType>WinExe</OutputType>
     <!-- Пульт — WPF со встроенной темой Fluent: светлая/тёмная тема и акцентный цвет берутся из Windows. -->
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
 
-    <!-- Deployment: one self-contained exe, no .NET runtime needed on the target PC -->
+    <!-- Поставка: один самодостаточный exe, на целевом ПК среда .NET не нужна -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>

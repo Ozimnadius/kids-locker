@@ -3,9 +3,9 @@ using KidsLocker.Service.Config;
 namespace KidsLocker.Service.Enforcement;
 
 /// <summary>
-/// A short-lived marker written by the app just before it deliberately stops the service
-/// (schedule save, reinstall, uninstall). The service's stop-alert consumes it to avoid
-/// crying "someone stopped the control!" when the stop was our own doing.
+/// Короткоживущая метка, которую приложение пишет прямо перед тем, как само намеренно остановить
+/// службу (сохранение расписания, переустановка, удаление). Алерт службы об остановке забирает её,
+/// чтобы не кричать «кто-то остановил контроль!», когда остановка была нашей собственной.
 /// </summary>
 public static class StopMarker
 {
@@ -16,10 +16,10 @@ public static class StopMarker
             AppPaths.EnsureRoot();
             File.WriteAllText(AppPaths.ExpectedStopFile, DateTime.UtcNow.Ticks.ToString());
         }
-        catch { /* best effort */ }
+        catch { /* по возможности */ }
     }
 
-    /// <summary>True if a fresh (&lt; 60s) expected-stop marker exists; deletes it either way.</summary>
+    /// <summary>True, если есть свежая (&lt; 60 с) метка ожидаемой остановки; удаляет её в любом случае.</summary>
     public static bool ConsumeIsExpected()
     {
         try
@@ -33,7 +33,7 @@ public static class StopMarker
                 return age >= TimeSpan.Zero && age < TimeSpan.FromSeconds(60);
             }
         }
-        catch { /* treat as unexpected */ }
+        catch { /* считаем остановку неожиданной */ }
         return false;
     }
 }
