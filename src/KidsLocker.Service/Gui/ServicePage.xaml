@@ -44,9 +44,24 @@
         <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0">
             <DockPanel>
                 <TextBlock DockPanel.Dock="Top" Text="Журнал" Style="{StaticResource CardTitle}" Margin="0,0,0,8" />
-                <TextBox x:Name="Log" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="120"
-                         VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
-                         FontFamily="Cascadia Mono, Consolas" FontSize="12" AutomationProperties.Name="Журнал установки" />
+                <Grid>
+                    <TextBox x:Name="Log" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="120"
+                             VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
+                             FontFamily="Cascadia Mono, Consolas" FontSize="12" AutomationProperties.Name="Журнал установки" />
+                    <!-- Подсказка в пустом журнале -->
+                    <TextBlock Text="Здесь появится ход установки или удаления." Margin="12,9" IsHitTestVisible="False">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource Hint}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text, ElementName=Log}" Value="">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
             </DockPanel>
         </Border>
     </Grid>

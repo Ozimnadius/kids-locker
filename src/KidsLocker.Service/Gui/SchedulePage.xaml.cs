@@ -94,10 +94,10 @@ public sealed partial class SchedulePage : UserControl, IPage
         SaveInfo.Hide();
 
         // Раньше опечатка молча сохраняла день как полностью запрещённый — теперь не сохраняем вовсе.
+        // Что не так, уже написано у поля и у кнопки — просто переводим курсор в это поле.
         var bad = _rows.FirstOrDefault(r => !r.Result.IsValid);
         if (bad is not null)
         {
-            SaveInfo.Show(InfoSeverity.Error, $"Расписание не сохранено: проверьте {bad.Accusative}. {bad.Result.Error}.");
             FocusDay(bad);
             return;
         }

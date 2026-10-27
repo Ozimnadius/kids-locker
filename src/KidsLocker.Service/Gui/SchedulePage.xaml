@@ -53,13 +53,13 @@
                                     <Grid Grid.Column="2" Margin="16,0,0,0">
                                         <gui:DayTimeline x:Name="Timeline" Height="8" VerticalAlignment="Center"
                                                          Intervals="{Binding Intervals}" />
-                                        <StackPanel x:Name="NotePanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
-                                            <TextBlock x:Name="NoteIcon" Style="{StaticResource Icon}" Text="&#xE783;" FontSize="12"
-                                                       Margin="0,0,6,0" Visibility="Collapsed"
+                                        <DockPanel x:Name="NotePanel" VerticalAlignment="Center" Visibility="Collapsed">
+                                            <TextBlock x:Name="NoteIcon" DockPanel.Dock="Left" Style="{StaticResource Icon}" Text="&#xE783;"
+                                                       FontSize="12" Margin="0,2,6,0" VerticalAlignment="Top" Visibility="Collapsed"
                                                        Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
                                             <TextBlock x:Name="NoteText" Text="{Binding Note}" FontSize="12" TextWrapping="Wrap"
                                                        VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                        </StackPanel>
+                                        </DockPanel>
                                     </Grid>
                                 </Grid>
                                 <DataTemplate.Triggers>
