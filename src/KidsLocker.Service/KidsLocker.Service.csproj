@@ -23,8 +23,9 @@
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
 
+  <!-- System.Diagnostics.EventLog входит в общий фреймворк Microsoft.WindowsDesktop.App,
+       отдельная ссылка на пакет не нужна (SDK 10 предупреждает об этом: NU1510). -->
   <ItemGroup>
-    <!-- System.Diagnostics.EventLog в .NET 10 входит во фреймворк Windows Desktop — отдельный пакет не нужен. -->
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.14" />
     <PackageReference Include="Microsoft.Extensions.Logging.EventLog" Version="10.0.14" />

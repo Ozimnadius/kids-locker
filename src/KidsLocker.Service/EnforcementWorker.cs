@@ -58,7 +58,7 @@ public sealed class EnforcementWorker : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            try { Tick(); }
+            try { await TickAsync(stoppingToken); }
             catch (Exception ex) { _log.LogError(ex, "Enforcement tick failed"); }
 
             try { await Task.Delay(period, stoppingToken); }
@@ -66,14 +66,33 @@ public sealed class EnforcementWorker : BackgroundService
         }
     }
 
-    private void Tick()
+    private async Task TickAsync(CancellationToken ct)
     {
-        if (_store.SyncAndDetectTamper())
-            _notifier.Alert("Файл расписания был изменён вручную — восстановил прежний. Проверьте /status.");
+        // Auxiliary steps run in their own guards: a failure in any of them (e.g. the schedule file
+        // was made read-only, so the tamper-revert write throws) must NEVER skip the critical
+        // evaluate-and-shut-down path below — that is exactly what would silently disable the control.
+        try
+        {
+            if (_store.SyncAndDetectTamper())
+                _notifier.Alert("Файл расписания был изменён вручную — восстановил прежний. Проверьте /status.");
+        }
+        catch (Exception ex) { _log.LogError(ex, "Schedule tamper check failed"); }
 
-        var schedule = _store.Get();
-        DetectClockJump();
-        DetectTimeZoneChange(schedule);
+        Schedule schedule;
+        try
+        {
+            schedule = _store.Get();
+        }
+        catch (Exception ex)
+        {
+            // The store should never throw here, but if it does, fall back to the strict default
+            // (which blocks at night) rather than letting the tick abort and skip enforcement.
+            _log.LogError(ex, "Schedule load failed; falling back to default");
+            schedule = Schedule.Default();
+        }
+
+        try { DetectClockJump(); } catch (Exception ex) { _log.LogError(ex, "Clock-jump check failed"); }
+        try { DetectTimeZoneChange(schedule); } catch (Exception ex) { _log.LogError(ex, "Time-zone check failed"); }
 
         var now = DateTime.Now;
         var eval = ScheduleEvaluator.Evaluate(schedule, now);
@@ -84,7 +103,13 @@ public sealed class EnforcementWorker : BackgroundService
             {
                 var who = SessionQuery.ActiveConsoleUser();
                 var whoTxt = who is null ? "" : $" (сеанс: {who})";
-                _notifier.Alert($"Запрещённое время{whoTxt}. Выключаю компьютер. [{now:HH:mm}]");
+                // Deliver the alert BEFORE the forced shutdown tears down the network — but cap the
+                // wait so an unreachable Telegram can't postpone enforcement. AlertAsync writes the
+                // local log/event synchronously first, so that record survives regardless.
+                using var alertCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                alertCts.CancelAfter(TimeSpan.FromSeconds(10));
+                try { await _notifier.AlertAsync($"Запрещённое время{whoTxt}. Выключаю компьютер. [{now:HH:mm}]", alertCts.Token); }
+                catch (Exception ex) { _log.LogError(ex, "Pre-shutdown alert failed"); }
             }
             _enforcer.ShutdownNow(eval.Reason);
         }

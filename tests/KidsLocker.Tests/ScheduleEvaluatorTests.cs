@@ -106,4 +106,14 @@ public class ScheduleEvaluatorTests
         Assert.True(ScheduleEvaluator.IsBlocked(s, Mon.AddHours(23).AddMinutes(30)));
         Assert.False(ScheduleEvaluator.IsBlocked(s, Mon.AddHours(20)));
     }
+
+    [Fact]
+    public void NullCollections_DoNotThrow_AndBlock()
+    {
+        // A schedule deserialized from {"Allowed": null, "Extras": null} must not crash evaluation;
+        // with no allowed intervals the moment is blocked (fail safe), not skipped by an exception.
+        var s = new Schedule { Allowed = null!, Extras = null! };
+        Assert.True(ScheduleEvaluator.IsBlocked(s, Mon.AddHours(12)));
+        Assert.Empty(ScheduleEvaluator.AllowedFor(s, Mon));
+    }
 }

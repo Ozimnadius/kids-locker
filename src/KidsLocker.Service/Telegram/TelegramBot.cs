@@ -31,13 +31,33 @@ public sealed class TelegramBot : BackgroundService
         _log.LogInformation("Telegram bot started; parent chat id {ChatId}", _config.ParentChatId);
         await _client.SendMessageAsync(_config.ParentChatId, "✅ KidsLocker запущен. /help — команды.", stoppingToken);
 
+        // A real long poll must sit on the server a while; a 0/short timeout against a failing
+        // endpoint is what turns the loop hot, so hold it at a sane minimum.
+        var pollSeconds = Math.Clamp(_config.TelegramLongPollSeconds, 20, 90);
         long offset = 0;
+        var failures = 0;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                var updates = await _client.GetUpdatesAsync(offset, _config.TelegramLongPollSeconds, stoppingToken);
-                foreach (var u in updates)
+                var poll = await _client.PollUpdatesAsync(offset, pollSeconds, stoppingToken);
+                if (poll.Failed)
+                {
+                    // Network down, bad/revoked token (401), a second poller or a webhook (409), rate
+                    // limit (429)… Back off exponentially (2→4→…→60s) instead of spinning the CPU and
+                    // flooding the API. The long poll paces the success path, so no delay is needed there.
+                    failures++;
+                    var backoff = TimeSpan.FromSeconds(Math.Min(60, 1 << Math.Min(failures, 6)));
+                    if (failures == 1 || failures % 10 == 0)
+                        _log.LogWarning("Telegram getUpdates failing; backing off {Seconds}s (attempt {Attempt})", backoff.TotalSeconds, failures);
+                    try { await Task.Delay(backoff, stoppingToken); }
+                    catch (OperationCanceledException) { break; }
+                    continue;
+                }
+
+                failures = 0;
+                foreach (var u in poll.Updates)
                 {
                     offset = Math.Max(offset, u.UpdateId + 1);
                     await Dispatch(u, stoppingToken);

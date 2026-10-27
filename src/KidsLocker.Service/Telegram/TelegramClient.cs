@@ -108,20 +108,29 @@ public sealed class TelegramClient
     }
 
     /// <summary>
-    /// Long-poll for updates newer than <paramref name="offset"/>. Returns an empty list on
-    /// timeout or transient error. Caller advances the offset past the highest UpdateId.
+    /// Result of a long-poll: the updates, plus whether the call FAILED (network/HTTP error) as
+    /// opposed to simply returning no updates. The bot loop uses <see cref="Failed"/> to back off
+    /// instead of hammering the API when the token is bad, a second poller is active (409), etc.
     /// </summary>
-    public async Task<List<TgUpdate>> GetUpdatesAsync(long offset, int timeoutSec, CancellationToken ct)
+    public readonly record struct UpdatesPoll(List<TgUpdate> Updates, bool Failed);
+
+    /// <summary>
+    /// Long-poll for updates newer than <paramref name="offset"/>. Distinguishes "no updates" from
+    /// "the call failed" so the caller can pace itself. Caller advances the offset past the highest
+    /// UpdateId. Never throws except on cancellation.
+    /// </summary>
+    public async Task<UpdatesPoll> PollUpdatesAsync(long offset, int timeoutSec, CancellationToken ct)
     {
         try
         {
-            var url = $"{_base}getUpdates?timeout={timeoutSec}&offset={offset}&allowed_updates=[\"message\"]";
+            var t = Math.Clamp(timeoutSec, 0, 120);
+            var url = $"{_base}getUpdates?timeout={t}&offset={offset}&allowed_updates=[\"message\"]";
             using var resp = await _http.GetAsync(url, ct);
-            if (!resp.IsSuccessStatusCode) return new();
+            if (!resp.IsSuccessStatusCode) return new(new(), Failed: true);
 
             await using var stream = await resp.Content.ReadAsStreamAsync(ct);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
-            if (!doc.RootElement.TryGetProperty("result", out var result)) return new();
+            if (!doc.RootElement.TryGetProperty("result", out var result)) return new(new(), Failed: true);
 
             var list = new List<TgUpdate>();
             foreach (var item in result.EnumerateArray())
@@ -129,7 +138,7 @@ public sealed class TelegramClient
                 var u = item.Deserialize<TgUpdate>(JsonOpts);
                 if (u is not null) list.Add(u);
             }
-            return list;
+            return new(list, Failed: false);
         }
         catch (OperationCanceledException)
         {
@@ -137,7 +146,15 @@ public sealed class TelegramClient
         }
         catch
         {
-            return new();
+            return new(new(), Failed: true);
         }
     }
+
+    /// <summary>
+    /// One-shot convenience for the GUI/CLI (token check, chat-id detection): returns just the
+    /// updates and treats any failure as "no updates". Not for the long-poll loop — that uses
+    /// <see cref="PollUpdatesAsync"/> so it can tell failure from emptiness and back off.
+    /// </summary>
+    public async Task<List<TgUpdate>> GetUpdatesAsync(long offset, int timeoutSec, CancellationToken ct)
+        => (await PollUpdatesAsync(offset, timeoutSec, ct)).Updates;
 }
