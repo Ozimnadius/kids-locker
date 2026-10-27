@@ -1,5 +1,7 @@
 using System.Runtime.Versioning;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
@@ -31,6 +33,7 @@ public sealed class InfoBar : Border
         Padding = new Thickness(14, 10, 14, 10);
         Margin = new Thickness(0, 0, 0, 8);
         Visibility = Visibility.Collapsed;
+        AutomationProperties.SetLiveSetting(this, AutomationLiveSetting.Polite); // диктор зачитает появившееся сообщение
         SetResourceReference(BorderBrushProperty, "CardStrokeColorDefaultBrush");
         _glyph.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorInverseBrush");
         _text.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorPrimaryBrush");
@@ -50,9 +53,9 @@ public sealed class InfoBar : Border
     {
         var (glyph, back, fill) = severity switch
         {
-            InfoSeverity.Success => ("", "SystemFillColorSuccessBackgroundBrush", "SystemFillColorSuccessBrush"),
-            InfoSeverity.Warning => ("", "SystemFillColorCautionBackgroundBrush", "SystemFillColorCautionBrush"),
-            InfoSeverity.Error => ("", "SystemFillColorCriticalBackgroundBrush", "SystemFillColorCriticalBrush"),
+            InfoSeverity.Success => ("\uE73E", "SystemFillColorSuccessBackgroundBrush", "SystemFillColorSuccessBrush"),
+            InfoSeverity.Warning => ("\uE8C9", "SystemFillColorCautionBackgroundBrush", "SystemFillColorCautionBrush"),
+            InfoSeverity.Error => ("\uE711", "SystemFillColorCriticalBackgroundBrush", "SystemFillColorCriticalBrush"),
             _ => ("i", "SystemFillColorAttentionBackgroundBrush", "SystemFillColorAttentionBrush"),
         };
 
@@ -76,7 +79,13 @@ public sealed class InfoBar : Border
         _glyph.Text = glyph;
         _text.Text = message;
         Visibility = Visibility.Visible;
+
+        AutomationProperties.SetName(this, message);
+        (UIElementAutomationPeer.FromElement(this) ?? UIElementAutomationPeer.CreatePeerForElement(this))
+            ?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
     }
 
     public void Hide() => Visibility = Visibility.Collapsed;
+
+    protected override AutomationPeer OnCreateAutomationPeer() => new FrameworkElementAutomationPeer(this);
 }

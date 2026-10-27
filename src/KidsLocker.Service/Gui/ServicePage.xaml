@@ -33,9 +33,10 @@
                 <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,12"
                            Text="«Тест» — ничего не выключает, для проверки. «Боевой» — включает реальное выключение." />
                 <WrapPanel>
-                    <Button x:Name="InstallDryButton" Content="Установить (тест)" Margin="0,0,8,0" Click="OnInstallDry" />
-                    <Button x:Name="InstallLiveButton" Content="Установить (боевой)" Margin="0,0,8,0"
-                            Style="{DynamicResource AccentButtonStyle}" Click="OnInstallLive" />
+                    <!-- Акцент — на безопасной установке: начинать советуют с теста. -->
+                    <Button x:Name="InstallDryButton" Content="Установить (тест)" Margin="0,0,8,0"
+                            Style="{DynamicResource AccentButtonStyle}" Click="OnInstallDry" />
+                    <Button x:Name="InstallLiveButton" Content="Установить (боевой)" Margin="0,0,8,0" Click="OnInstallLive" />
                     <Button x:Name="UninstallButton" Content="Удалить" Style="{StaticResource DangerButton}" Click="OnUninstall" />
                 </WrapPanel>
             </StackPanel>
@@ -45,7 +46,7 @@
             <DockPanel>
                 <TextBlock DockPanel.Dock="Top" Text="Журнал" Style="{StaticResource CardTitle}" Margin="0,0,0,8" />
                 <Grid>
-                    <TextBox x:Name="Log" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="120"
+                    <TextBox x:Name="Log" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="60"
                              VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
                              FontFamily="Cascadia Mono, Consolas" FontSize="12" AutomationProperties.Name="Журнал установки" />
                     <!-- Подсказка в пустом журнале -->

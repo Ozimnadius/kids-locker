@@ -21,14 +21,16 @@ public sealed partial class ServicePage : UserControl, IPage
     public void SetBusy(bool busy) =>
         RefreshButton.IsEnabled = InstallDryButton.IsEnabled = InstallLiveButton.IsEnabled = UninstallButton.IsEnabled = !busy;
 
+    public bool HasUnsavedChanges => false; // здесь нечего сохранять
+
     public void ShowState(ServiceControl.State state, DateTime checkedAt)
     {
         var (glyph, brush, text) = state switch
         {
-            ServiceControl.State.Running => ("", "SystemFillColorSuccessBrush", "Служба работает"),
-            ServiceControl.State.Stopped => ("", "SystemFillColorCautionBrush", "Служба установлена, но остановлена"),
-            ServiceControl.State.Missing => ("", "TextFillColorTertiaryBrush", "Служба не установлена"),
-            _ => ("", "TextFillColorTertiaryBrush", "Состояние службы неизвестно"),
+            ServiceControl.State.Running => ("\uEA18", "SystemFillColorSuccessBrush", "Служба работает"),
+            ServiceControl.State.Stopped => ("\uE7BA", "SystemFillColorCautionBrush", "Служба установлена, но остановлена"),
+            ServiceControl.State.Missing => ("\uEA18", "TextFillColorTertiaryBrush", "Служба не установлена"),
+            _ => ("\uE9CE", "TextFillColorTertiaryBrush", "Состояние службы неизвестно"),
         };
         StateIcon.Text = glyph;
         StateIcon.SetResourceReference(TextBlock.ForegroundProperty, brush);

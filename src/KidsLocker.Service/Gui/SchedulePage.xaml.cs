@@ -31,7 +31,6 @@ public sealed partial class SchedulePage : UserControl, IPage
     private readonly IShell _shell;
     private readonly List<DayRow> _rows = new();
     private string[] _savedTexts = Array.Empty<string>();
-    private bool _savedEnabled;
 
     public SchedulePage(IShell shell)
     {
@@ -50,6 +49,10 @@ public sealed partial class SchedulePage : UserControl, IPage
             button.IsEnabled = !busy;
     }
 
+    public bool HasUnsavedChanges =>
+        _savedTexts.Length == _rows.Count
+        && _rows.Where((r, i) => !r.Result.IsValid || ScheduleText.Format(r.Intervals) != _savedTexts[i]).Any();
+
     private void LoadSchedule()
     {
         var s = new ScheduleStore().Load();
@@ -67,7 +70,6 @@ public sealed partial class SchedulePage : UserControl, IPage
     private void MarkSaved()
     {
         _savedTexts = _rows.Select(r => ScheduleText.Format(r.Intervals)).ToArray();
-        _savedEnabled = Enabled.IsChecked == true;
         UpdateSaveHint();
     }
 
@@ -78,16 +80,45 @@ public sealed partial class SchedulePage : UserControl, IPage
         {
             SaveHint.Text = $"Сначала исправьте {bad.Accusative}";
             SaveHint.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorCriticalBrush");
+            SaveInfo.Hide();
             return;
         }
 
-        var dirty = _savedEnabled != (Enabled.IsChecked == true)
-                    || _rows.Where((r, i) => ScheduleText.Format(r.Intervals) != _savedTexts[i]).Any();
+        var dirty = HasUnsavedChanges;
         SaveHint.Text = dirty ? "Есть несохранённые изменения" : "";
         SaveHint.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
+        if (dirty) SaveInfo.Hide(); // «Расписание сохранено» больше не про то, что на экране
     }
 
-    private void OnEnabledClick(object sender, RoutedEventArgs e) => UpdateSaveHint();
+    // Тумблер, как в «Параметрах» Windows, действует сразу — а не по кнопке из соседней карточки.
+    private async void OnEnabledClick(object sender, RoutedEventArgs e)
+    {
+        var enable = Enabled.IsChecked == true;
+        EnabledInfo.Hide();
+        if (!enable && !ConfirmDialog.Ask(Window.GetWindow(this), "Выключить контроль?",
+                "Компьютер перестанет выключаться по расписанию, пока контроль снова не включат.",
+                "Выключить", risky: true))
+        {
+            Enabled.IsChecked = true;
+            return;
+        }
+
+        var error = await _shell.RunAsync(enable ? "Включаю контроль…" : "Выключаю контроль…",
+            () => Task.Run(() => ServiceControl.ApplyWithReload(() => new ScheduleStore().Update(x => x.Enabled = enable))),
+            critical: true);
+        if (error is null)
+        {
+            EnabledInfo.Show(enable ? InfoSeverity.Success : InfoSeverity.Warning,
+                enable ? "Контроль включён." : "Контроль выключен: компьютер не будет выключаться по расписанию.");
+        }
+        else
+        {
+            Enabled.IsChecked = !enable;
+            EnabledInfo.Show(InfoSeverity.Error, "Не удалось: " + error.Message);
+        }
+        RefreshStatus();
+        _shell.RefreshServiceStatus();
+    }
 
     private async void OnSave(object sender, RoutedEventArgs e)
     {
@@ -102,8 +133,9 @@ public sealed partial class SchedulePage : UserControl, IPage
             return;
         }
 
-        var s = new ScheduleStore().Load(); // сохраняем дополнительные отрезки, паузу и часовой пояс
-        s.Enabled = Enabled.IsChecked == true;
+        // Сохраняем только дни: дополнительные отрезки, пауза, часовой пояс и «Контроль включён»
+        // остаются как в файле (тумблер применяется сам, а его могли переключить и из Telegram).
+        var s = new ScheduleStore().Load();
         foreach (var row in _rows)
             s.Allowed[row.Key] = row.Intervals.ToList();
 
@@ -129,8 +161,16 @@ public sealed partial class SchedulePage : UserControl, IPage
     private void OnResume(object sender, RoutedEventArgs e) =>
         RunAction("Снимаю паузу…", st => st.Update(x => x.PauseUntil = null));
 
-    private void OnExtraHour(object sender, RoutedEventArgs e) =>
+    private void OnExtraHour(object sender, RoutedEventArgs e)
+    {
+        // Раньше в этом случае молча записывался пустой отрезок 24:00-24:00.
+        if (ReadScheduleQuietly() is { } s && ExtraHourStart(s, DateTime.Now) >= TimeParsing.EndOfDay)
+        {
+            ActionInfo.Show(InfoSeverity.Info, "Сегодня и так разрешено до полуночи — добавлять нечего.");
+            return;
+        }
         RunAction("Добавляю час на сегодня…", AddExtraHour);
+    }
 
     private async void RunAction(string text, Action<ScheduleStore> op)
     {
@@ -142,12 +182,18 @@ public sealed partial class SchedulePage : UserControl, IPage
         _shell.RefreshServiceStatus();
     }
 
+    // Час начинается с конца сегодняшнего разрешённого времени (или с «сейчас», если оно уже прошло).
+    private static TimeSpan ExtraHourStart(Schedule s, DateTime now)
+    {
+        var latest = ScheduleEvaluator.AllowedFor(s, now).Select(r => r.To).DefaultIfEmpty(now.TimeOfDay).Max();
+        return now.TimeOfDay > latest ? now.TimeOfDay : latest;
+    }
+
     private static void AddExtraHour(ScheduleStore st)
     {
         var now = DateTime.Now;
-        var s = st.Load();
-        var latest = ScheduleEvaluator.AllowedFor(s, now).Select(r => r.To).DefaultIfEmpty(now.TimeOfDay).Max();
-        var start = now.TimeOfDay > latest ? now.TimeOfDay : latest;
+        var start = ExtraHourStart(st.Load(), now);
+        if (start >= TimeParsing.EndOfDay) return; // сегодня и так разрешено до полуночи
         var end = start + TimeSpan.FromHours(1);
         if (end > TimeParsing.EndOfDay) end = TimeParsing.EndOfDay;
         st.Update(x => x.Extras.Add(new DatedInterval(now.ToString("yyyy-MM-dd"), TimeParsing.Format(start), TimeParsing.Format(end))));
@@ -159,29 +205,26 @@ public sealed partial class SchedulePage : UserControl, IPage
                 "Все программы закроются без сохранения.", "Выключить", risky: true))
             return;
 
+        ActionInfo.Hide();
+        (int code, string output) result = default;
         var error = await _shell.RunAsync("Выключаю компьютер…",
-            () => Task.Run(() => Installer.RunProcess("shutdown.exe", "/s /f /t 0")), critical: false);
-        if (error is not null) ActionInfo.Show(InfoSeverity.Error, "Ошибка: " + error.Message);
+            () => Task.Run(() => result = Installer.RunProcess("shutdown.exe", "/s /f /t 0")), critical: false);
+        if (error is not null)
+            ActionInfo.Show(InfoSeverity.Error, "Ошибка: " + error.Message);
+        else if (result.code != 0)
+            ActionInfo.Show(InfoSeverity.Error, $"Компьютер не выключился (код {result.code}). {result.output}".Trim());
     }
 
     /// <summary>
-    /// Обновить карточку «сейчас». Файл расписания здесь только читается: опрос раз в полминуты
-    /// ничего не должен записывать, даже если файл как раз меняет служба.
+    /// Обновить карточку «сейчас» и тумблер. Файл расписания здесь только читается: опрос раз в
+    /// полминуты ничего не должен записывать, даже если файл как раз меняет служба.
     /// </summary>
     public void RefreshStatus()
     {
-        Schedule? s;
-        try
-        {
-            s = File.Exists(AppPaths.ScheduleFile)
-                ? JsonSerializer.Deserialize<Schedule>(File.ReadAllText(AppPaths.ScheduleFile), JsonOpts)
-                : null;
-        }
-        catch
-        {
-            return; // файл как раз перезаписывают — покажем при следующем обновлении
-        }
-        if (s is null) return;
+        if (ReadScheduleQuietly() is not { } s) return;
+
+        // Контроль могли переключить из Telegram (/on, /off), пока пульт открыт.
+        if (Enabled.IsEnabled) Enabled.IsChecked = s.Enabled;
 
         var now = DateTime.Now;
         var eval = ScheduleEvaluator.Evaluate(s, now);
@@ -196,15 +239,24 @@ public sealed partial class SchedulePage : UserControl, IPage
 
         var details = new List<string>();
         if (s.PauseUntil is DateTime pause && pause > now) details.Add($"Пауза до {pause:HH:mm}");
-        if (ScheduleEvaluator.NextChange(s, now) is DateTime change) details.Add($"Смена в {RoundUpToMinute(change):ddd HH:mm}");
+        if (ScheduleEvaluator.NextChange(s, now) is DateTime change) details.Add($"Смена в {change:ddd HH:mm}");
         NowDetails.Text = string.Join(" · ", details);
     }
 
-    // Конец дня «24:00» вычисляется как 23:59:59.9999999 — показываем его как полночь.
-    private static DateTime RoundUpToMinute(DateTime t)
+    // Читаем так, чтобы не мешать службе заменять файл (File.Move поверх открытого файла).
+    private static Schedule? ReadScheduleQuietly()
     {
-        var rest = t.Ticks % TimeSpan.TicksPerMinute;
-        return rest == 0 ? t : t.AddTicks(TimeSpan.TicksPerMinute - rest);
+        try
+        {
+            if (!File.Exists(AppPaths.ScheduleFile)) return null;
+            using var stream = new FileStream(AppPaths.ScheduleFile, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            return JsonSerializer.Deserialize<Schedule>(stream, JsonOpts);
+        }
+        catch
+        {
+            return null; // файл как раз перезаписывают — покажем при следующем обновлении
+        }
     }
 
     private void FocusDay(DayRow row)

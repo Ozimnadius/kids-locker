@@ -29,7 +29,14 @@ public static class ScheduleInput
 
         // Те же разделители и правила, что у ScheduleText: раз каждый кусок прошёл проверку,
         // при сохранении ни один не выпадет, а время будет в виде ЧЧ:ММ.
-        return new DayInput(ScheduleText.ParseIntervals(text ?? ""), null);
+        var intervals = ScheduleText.ParseIntervals(text ?? "");
+
+        // Страховка на случай, если правила ScheduleText однажды станут строже этих:
+        // тихая потеря куска при сохранении — именно та ошибка, которую закрывает эта проверка.
+        if (intervals.Count != pieces.Length)
+            return new DayInput(Array.Empty<Interval>(), "Не удалось разобрать время — нужно ЧЧ:ММ-ЧЧ:ММ");
+
+        return new DayInput(intervals, null);
     }
 
     private static string? CheckPiece(string piece)

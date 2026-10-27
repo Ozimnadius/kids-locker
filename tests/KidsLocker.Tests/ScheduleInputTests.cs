@@ -1,4 +1,5 @@
 using KidsLocker.Service.Gui;
+using KidsLocker.Service.Scheduling;
 using Xunit;
 
 namespace KidsLocker.Tests;
@@ -102,5 +103,65 @@ public class ScheduleInputTests
         var r = ScheduleInput.Check(input);
         Assert.Null(r.Error);
         Assert.Equal(count, r.Intervals.Count);
+    }
+
+    [Theory]
+    [InlineData("07:00-23:00")]
+    [InlineData("\t07:00-23:00")]
+    [InlineData("07:00-23:00\u00A0")] // неразрывный пробел
+    [InlineData("\u00A007:00 - 12:00 ,14:00-23:00")]
+    [InlineData("7:00-9:00,10:00-11:00,12.00-13.00")]
+    [InlineData("07:00–24:00")]
+    [InlineData(" , 07:00-23:00")]
+    [InlineData("07:00-12:00,,14:00-23:00")]
+    public void Check_Accepted_KeepsEveryPiece(string input)
+    {
+        // Гарантия для сохранения: если проверка прошла, ScheduleText не выбросит ни одного куска.
+        var pieces = input.Split(',').Count(p => p.Trim().Length > 0);
+        var r = ScheduleInput.Check(input);
+        Assert.Null(r.Error);
+        Assert.Equal(pieces, r.Intervals.Count);
+        Assert.Equal(pieces, ScheduleText.ParseIntervals(input).Count);
+    }
+}
+
+public class DayRowTests
+{
+    [Fact]
+    public void Typo_IsError_ForBindingAndNote()
+    {
+        var row = new DayRow("sat", "Сб", "Суббота", "субботу", "10:00-2З:00");
+        Assert.Equal(DayState.Error, row.State);
+        Assert.True(row.HasErrors);
+        Assert.Equal(row.Result.Error, Assert.Single(row.GetErrors(nameof(DayRow.Text)).Cast<string>()));
+        Assert.Equal(row.Result.Error, row.Note);
+    }
+
+    [Fact]
+    public void Empty_IsBlockedAllDay_WithoutErrors()
+    {
+        var row = new DayRow("sun", "Вс", "Воскресенье", "воскресенье", "");
+        Assert.Equal(DayState.BlockedAllDay, row.State);
+        Assert.False(row.HasErrors);
+        Assert.Empty(row.GetErrors(nameof(DayRow.Text)).Cast<string>());
+        Assert.Equal("Весь день запрещено", row.Note);
+    }
+
+    [Fact]
+    public void FixingTypo_ClearsError_AndNotifiesBinding()
+    {
+        var row = new DayRow("sat", "Сб", "Суббота", "субботу", "10:00-2З:00");
+        var errorsChanged = 0;
+        var changed = new List<string?>();
+        row.ErrorsChanged += (_, _) => errorsChanged++;
+        row.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        row.Text = "10:00-23:00";
+
+        Assert.Equal(DayState.Allowed, row.State);
+        Assert.False(row.HasErrors);
+        Assert.Equal(1, errorsChanged); // рамка ошибки у поля снимется
+        Assert.Contains(nameof(DayRow.State), changed);
+        Assert.Contains(nameof(DayRow.Intervals), changed); // полоска суток перерисуется
     }
 }

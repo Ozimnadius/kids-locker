@@ -7,18 +7,21 @@
             <TextBlock Text="Расписание" Style="{StaticResource PageTitle}" />
 
             <Border Style="{StaticResource Card}">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock Text="Контроль включён" />
-                        <TextBlock Style="{StaticResource Hint}" Text="Вне разрешённых часов компьютер выключается" />
-                    </StackPanel>
-                    <CheckBox x:Name="Enabled" Grid.Column="1" Style="{StaticResource ToggleSwitch}" VerticalAlignment="Center"
-                              AutomationProperties.Name="Контроль включён" Click="OnEnabledClick" />
-                </Grid>
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Контроль включён" />
+                            <TextBlock Style="{StaticResource Hint}" Text="Вне разрешённых часов компьютер выключается" />
+                        </StackPanel>
+                        <CheckBox x:Name="Enabled" Grid.Column="1" Style="{StaticResource ToggleSwitch}" VerticalAlignment="Center"
+                                  AutomationProperties.Name="Контроль включён" Click="OnEnabledClick" />
+                    </Grid>
+                    <gui:InfoBar x:Name="EnabledInfo" Margin="0,12,0,0" />
+                </StackPanel>
             </Border>
 
             <Border Style="{StaticResource Card}">
@@ -49,7 +52,8 @@
                                     <TextBox Grid.Column="1"
                                              Text="{Binding Text, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True}"
                                              AutomationProperties.AutomationId="{Binding AutomationId}"
-                                             AutomationProperties.Name="{Binding FullName}" />
+                                             AutomationProperties.Name="{Binding FullName}"
+                                             AutomationProperties.HelpText="{Binding Note}" />
                                     <Grid Grid.Column="2" Margin="16,0,0,0">
                                         <gui:DayTimeline x:Name="Timeline" Height="8" VerticalAlignment="Center"
                                                          Intervals="{Binding Intervals}" />

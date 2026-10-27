@@ -12,6 +12,7 @@ namespace KidsLocker.Service.Gui;
 public sealed partial class TelegramPage : UserControl, IPage
 {
     private readonly IShell _shell;
+    private string _savedToken, _savedChatId;
 
     public TelegramPage(IShell shell)
     {
@@ -19,12 +20,15 @@ public sealed partial class TelegramPage : UserControl, IPage
         _shell = shell;
 
         var config = AppConfig.Load();
-        Token.Text = config.BotToken;
-        ChatId.Text = config.ParentChatId != 0 ? config.ParentChatId.ToString() : "";
+        Token.Text = _savedToken = config.BotToken;
+        ChatId.Text = _savedChatId = config.ParentChatId != 0 ? config.ParentChatId.ToString() : "";
     }
 
     public void SetBusy(bool busy) =>
         DetectButton.IsEnabled = TestButton.IsEnabled = SaveButton.IsEnabled = !busy;
+
+    public bool HasUnsavedChanges =>
+        Token.Text.Trim() != _savedToken.Trim() || ChatId.Text.Trim() != _savedChatId;
 
     private async void OnDetect(object sender, RoutedEventArgs e)
     {
@@ -105,9 +109,15 @@ public sealed partial class TelegramPage : UserControl, IPage
             () => Task.Run(() => ServiceControl.ApplyWithReload(cfg.Save)), critical: true);
 
         if (error is null)
+        {
+            _savedToken = token;
+            _savedChatId = chatId.ToString();
             Status.Show(InfoSeverity.Success, "Сохранено. Служба перезапущена (если установлена).");
+        }
         else
+        {
             Status.Show(InfoSeverity.Error, "Не удалось сохранить: " + error.Message);
+        }
         _shell.RefreshServiceStatus();
     }
 }

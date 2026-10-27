@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.Versioning;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using KidsLocker.Service.Config;
@@ -17,7 +18,8 @@ public sealed partial class MainWindow : Window, IShell
     private readonly ServicePage _service;
     private readonly SchedulePage _schedule;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(30) };
-    private bool _critical;
+    private bool _busy, _critical;
+    private IInputElement? _focusBeforeBusy;
 
     public MainWindow()
     {
@@ -40,6 +42,7 @@ public sealed partial class MainWindow : Window, IShell
 
         _timer.Tick += (_, _) =>
         {
+            if (_busy) return; // во время работы файлы как раз переписываются — обновим в следующий раз
             RefreshServiceStatus();
             _schedule.RefreshStatus();
         };
@@ -53,6 +56,12 @@ public sealed partial class MainWindow : Window, IShell
 
     private void OnNavigate(object sender, SelectionChangedEventArgs e)
     {
+        // Ctrl+щелчок по выбранному разделу снимает выбор — возвращаем его, страница-то осталась.
+        if (Nav.SelectedItem is null && e.RemovedItems.Count > 0)
+        {
+            Nav.SelectedItem = e.RemovedItems[0];
+            return;
+        }
         if (Nav.SelectedItem is not ListBoxItem item) return;
         PageHost.Content = (string)item.Tag switch
         {
@@ -82,12 +91,21 @@ public sealed partial class MainWindow : Window, IShell
 
     private void SetBusy(bool busy, string text, bool critical)
     {
+        if (busy) _focusBeforeBusy = Keyboard.FocusedElement;
+        _busy = busy;
         _critical = busy && critical;
         BusyText.Text = text;
         BusyPanel.Visibility = busy ? Visibility.Visible : Visibility.Hidden;
         BusyBar.IsIndeterminate = busy; // невидимая бесконечная анимация зря тратила бы процессор
         foreach (var page in new IPage[] { _telegram, _service, _schedule })
             page.SetBusy(busy);
+
+        // Кнопка с фокусом на время работы выключалась — возвращаем фокус на неё.
+        if (!busy)
+        {
+            if (_focusBeforeBusy is UIElement { IsEnabled: true, IsVisible: true } element) element.Focus();
+            _focusBeforeBusy = null;
+        }
     }
 
     public void RefreshServiceStatus()
@@ -114,6 +132,23 @@ public sealed partial class MainWindow : Window, IShell
             ConfirmDialog.Inform(this, "Подождите немного",
                 "Пульт сейчас меняет службу. Закрыть окно можно будет сразу после этого.");
             return;
+        }
+
+        var unsaved = new[] { (Page: (IPage)_telegram, Key: "telegram", Title: "Telegram"), (_schedule, "schedule", "Расписание") }
+            .Where(p => p.Page.HasUnsavedChanges)
+            .ToList();
+        if (unsaved.Count > 0)
+        {
+            var where = unsaved.Count == 1
+                ? $"в разделе «{unsaved[0].Title}»"
+                : "в разделах " + string.Join(" и ", unsaved.Select(p => $"«{p.Title}»"));
+            if (!ConfirmDialog.Ask(this, "Закрыть без сохранения?",
+                    $"Изменения {where} не сохранены и пропадут.", "Закрыть", risky: true))
+            {
+                e.Cancel = true;
+                ShowPage(unsaved[0].Key);
+                return;
+            }
         }
         base.OnClosing(e);
     }

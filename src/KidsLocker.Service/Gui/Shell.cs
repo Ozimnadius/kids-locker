@@ -14,8 +14,11 @@ public interface IShell
     void RefreshServiceStatus();
 }
 
-/// <summary>Страница пульта, которая умеет блокировать свои кнопки на время фоновой работы.</summary>
+/// <summary>Страница пульта: блокирует свои кнопки на время фоновой работы и знает о несохранённых правках.</summary>
 public interface IPage
 {
     void SetBusy(bool busy);
+
+    /// <summary>Есть правки, которые пропадут, если закрыть пульт без сохранения.</summary>
+    bool HasUnsavedChanges { get; }
 }
