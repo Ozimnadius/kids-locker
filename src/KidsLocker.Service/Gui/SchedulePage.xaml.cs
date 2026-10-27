@@ -164,7 +164,7 @@ public sealed partial class SchedulePage : UserControl, IPage
     private void OnExtraHour(object sender, RoutedEventArgs e)
     {
         // Раньше в этом случае молча записывался пустой отрезок 24:00-24:00.
-        if (ReadScheduleQuietly() is { } s && ExtraHourStart(s, DateTime.Now) >= TimeParsing.EndOfDay)
+        if (ReadScheduleQuietly() is { } s && ScheduleEvaluator.BuildExtra(s, DateTime.Now, 60) is null)
         {
             ActionInfo.Show(InfoSeverity.Info, "Сегодня и так разрешено до полуночи — добавлять нечего.");
             return;
@@ -182,21 +182,13 @@ public sealed partial class SchedulePage : UserControl, IPage
         _shell.RefreshServiceStatus();
     }
 
-    // Час начинается с конца сегодняшнего разрешённого времени (или с «сейчас», если оно уже прошло).
-    private static TimeSpan ExtraHourStart(Schedule s, DateTime now)
-    {
-        var latest = ScheduleEvaluator.AllowedFor(s, now).Select(r => r.To).DefaultIfEmpty(now.TimeOfDay).Max();
-        return now.TimeOfDay > latest ? now.TimeOfDay : latest;
-    }
-
+    // Тот же общий расчёт, что у команды Telegram /extra: час с конца сегодняшнего разрешённого
+    // времени (или с «сейчас»), не дальше полуночи; null — добавлять нечего.
     private static void AddExtraHour(ScheduleStore st)
     {
-        var now = DateTime.Now;
-        var start = ExtraHourStart(st.Load(), now);
-        if (start >= TimeParsing.EndOfDay) return; // сегодня и так разрешено до полуночи
-        var end = start + TimeSpan.FromHours(1);
-        if (end > TimeParsing.EndOfDay) end = TimeParsing.EndOfDay;
-        st.Update(x => x.Extras.Add(new DatedInterval(now.ToString("yyyy-MM-dd"), TimeParsing.Format(start), TimeParsing.Format(end))));
+        var extra = ScheduleEvaluator.BuildExtra(st.Load(), DateTime.Now, 60);
+        if (extra is not null)
+            st.Update(x => x.Extras.Add(extra));
     }
 
     private async void OnShutdown(object sender, RoutedEventArgs e)
