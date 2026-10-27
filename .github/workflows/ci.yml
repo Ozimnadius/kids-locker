@@ -36,15 +36,16 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Установить .NET 8 SDK
+      - name: Установить .NET 10 SDK
         id: dotnet
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
-      # На раннере предустановлены и более новые SDK (9, 10). Без global.json
-      # dotnet взял бы самый новый, а при LangVersion=latest это другой C#.
-      - name: Зафиксировать SDK 8
+      # На раннере предустановлены и другие SDK, а с выходом .NET 11 появится
+      # и более новый. Без global.json dotnet взял бы самый новый, а при
+      # LangVersion=latest это другой C#.
+      - name: Зафиксировать SDK 10
         run: echo '{"sdk":{"version":"${{ steps.dotnet.outputs.dotnet-version }}"}}' > global.json
 
       # Ключ — версия SDK и csproj: от них зависит набор пакетов,

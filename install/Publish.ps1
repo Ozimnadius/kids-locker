@@ -23,7 +23,7 @@ if (-not $dotnet) {
     $candidate = Join-Path $env:LOCALAPPDATA "Microsoft\dotnet\dotnet.exe"
     if (Test-Path $candidate) { $dotnet = $candidate }
 }
-if (-not $dotnet) { throw "dotnet SDK not found. Install .NET 8 SDK first." }
+if (-not $dotnet) { throw "dotnet SDK not found. Install .NET 10 SDK first." }
 
 Write-Host "Publishing KidsLocker ($Configuration, $Runtime)..." -ForegroundColor Cyan
 & $dotnet publish $proj -c $Configuration -r $Runtime `
