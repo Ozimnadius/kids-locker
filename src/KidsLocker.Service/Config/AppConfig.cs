@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KidsLocker.Service.Notifications;
 
 namespace KidsLocker.Service.Config;
 
@@ -39,24 +40,71 @@ public sealed class AppConfig
 
     public static AppConfig Load()
     {
+        TryLoad(out var config, out _);
+        return config;
+    }
+
+    /// <summary>
+    /// Load the config. Returns true on a clean load or a genuine first run (no file); returns FALSE
+    /// when the file exists but can't be read or parsed — a caller that is about to save (the GUI)
+    /// must not overwrite in that case, or it would wipe the master-password hash and token. On
+    /// failure <paramref name="config"/> is a fresh default and the problem is written to the event log.
+    /// </summary>
+    public static bool TryLoad(out AppConfig config, out string? error)
+    {
+        error = null;
+        if (!File.Exists(AppPaths.ConfigFile))
+        {
+            config = new AppConfig();
+            return true;
+        }
         try
         {
-            if (File.Exists(AppPaths.ConfigFile))
+            var parsed = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(AppPaths.ConfigFile), JsonOpts);
+            if (parsed is not null)
             {
-                var json = File.ReadAllText(AppPaths.ConfigFile);
-                return JsonSerializer.Deserialize<AppConfig>(json, JsonOpts) ?? new AppConfig();
+                config = parsed;
+                return true;
             }
+            error = "файл пуст или не является корректным JSON";
         }
-        catch
+        catch (Exception ex)
         {
-            // Fall through to defaults — a bad/absent config must not crash enforcement.
+            error = ex.Message;
         }
-        return new AppConfig();
+        WindowsEventLog.TryWrite($"Не удалось прочитать config.local.json ({error}). Настройки (токен, пароль) временно недоступны.");
+        config = new AppConfig();
+        return false;
     }
 
     public void Save()
     {
         AppPaths.EnsureRoot();
-        File.WriteAllText(AppPaths.ConfigFile, JsonSerializer.Serialize(this, JsonOpts));
+
+        // Never lose secrets already on disk just because this instance was built from a failed/empty
+        // Load: keep the stored master-password hash and token when we aren't setting them ourselves.
+        // (The GUI "save Telegram" path carries no password, so without this a save started after an
+        // unreadable Load would erase it.)
+        try
+        {
+            if (File.Exists(AppPaths.ConfigFile))
+            {
+                var existing = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(AppPaths.ConfigFile), JsonOpts);
+                if (existing is not null)
+                {
+                    MasterPasswordHash ??= existing.MasterPasswordHash;
+                    MasterPasswordSalt ??= existing.MasterPasswordSalt;
+                    if (string.IsNullOrWhiteSpace(BotToken)) BotToken = existing.BotToken;
+                    if (ParentChatId == 0) ParentChatId = existing.ParentChatId;
+                }
+            }
+        }
+        catch { /* can't read existing — just write what we have */ }
+
+        // Atomic write: a crash or power loss mid-write must not leave a truncated, unparseable config.
+        var json = JsonSerializer.Serialize(this, JsonOpts);
+        var tmp = AppPaths.ConfigFile + ".tmp";
+        File.WriteAllText(tmp, json);
+        File.Move(tmp, AppPaths.ConfigFile, overwrite: true);
     }
 }

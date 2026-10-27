@@ -14,6 +14,7 @@ public sealed class TgUpdate
 public sealed class TgMessage
 {
     [JsonPropertyName("message_id")] public long MessageId { get; set; }
+    [JsonPropertyName("date")] public long Date { get; set; } // unix seconds when the message was sent
     [JsonPropertyName("chat")] public TgChat? Chat { get; set; }
     [JsonPropertyName("text")] public string? Text { get; set; }
 }

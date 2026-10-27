@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
+using Microsoft.Win32;
 using KidsLocker.Service.Config;
 using KidsLocker.Service.Enforcement;
 using KidsLocker.Service.Notifications;
@@ -29,6 +30,8 @@ public sealed class EnforcementWorker : BackgroundService
     private DateTime _lastWallUtc;
     private long _lastStamp;
     private DateTime _lastHardenUtc = DateTime.UtcNow;
+    private volatile bool _resumedSinceLastTick;
+    private bool _corruptAlerted;
 
     public EnforcementWorker(
         ILogger<EnforcementWorker> log,
@@ -54,16 +57,33 @@ public sealed class EnforcementWorker : BackgroundService
         _lastWallUtc = DateTime.UtcNow;
         _lastStamp = Stopwatch.GetTimestamp();
 
+        // Waking from sleep/hibernation jumps the wall clock while the monotonic timer stood still,
+        // which the clock-jump detector would otherwise misread as "time changed". Note the resume so
+        // the next check is skipped. Best-effort: if the power event can't be hooked here, behaviour
+        // is simply unchanged (the pre-existing false alert).
+        try { SystemEvents.PowerModeChanged += OnPowerModeChanged; } catch { /* no message pump available */ }
+
         var period = TimeSpan.FromSeconds(Math.Clamp(_config.PollSeconds, 3, 120));
-
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try { await TickAsync(stoppingToken); }
-            catch (Exception ex) { _log.LogError(ex, "Enforcement tick failed"); }
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try { await TickAsync(stoppingToken); }
+                catch (Exception ex) { _log.LogError(ex, "Enforcement tick failed"); }
 
-            try { await Task.Delay(period, stoppingToken); }
-            catch (OperationCanceledException) { break; }
+                try { await Task.Delay(period, stoppingToken); }
+                catch (OperationCanceledException) { break; }
+            }
         }
+        finally
+        {
+            try { SystemEvents.PowerModeChanged -= OnPowerModeChanged; } catch { }
+        }
+    }
+
+    private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == PowerModes.Resume) _resumedSinceLastTick = true;
     }
 
     private async Task TickAsync(CancellationToken ct)
@@ -85,10 +105,16 @@ public sealed class EnforcementWorker : BackgroundService
         }
         catch (Exception ex)
         {
-            // The store should never throw here, but if it does, fall back to the strict default
-            // (which blocks at night) rather than letting the tick abort and skip enforcement.
-            _log.LogError(ex, "Schedule load failed; falling back to default");
-            schedule = Schedule.Default();
+            // The store should never throw here, but if it does, fail safe to blocking everything
+            // (Enabled, no allowed intervals) rather than relaxing enforcement or aborting the tick.
+            _log.LogError(ex, "Schedule load failed; blocking until it can be read");
+            schedule = new Schedule { Enabled = true };
+        }
+
+        if (_store.ScheduleFileCorrupt && !_corruptAlerted)
+        {
+            _corruptAlerted = true;
+            _notifier.Alert("Файл расписания повреждён и не читается — временно блокирую ВСЁ время. Откройте пульт и сохраните расписание заново.");
         }
 
         try { DetectClockJump(); } catch (Exception ex) { _log.LogError(ex, "Clock-jump check failed"); }
@@ -157,7 +183,12 @@ public sealed class EnforcementWorker : BackgroundService
         var wall = nowUtc - _lastWallUtc;
         var drift = wall - monotonic;
 
-        if (_wasBlocked.HasValue && Math.Abs(drift.TotalSeconds) > 120)
+        // Just resumed from sleep/hibernation: the gap is real elapsed time the monotonic timer
+        // (Stopwatch/QPC) did not count, not a clock change. Skip this one comparison and re-baseline.
+        var justResumed = _resumedSinceLastTick;
+        _resumedSinceLastTick = false;
+
+        if (!justResumed && _wasBlocked.HasValue && Math.Abs(drift.TotalSeconds) > 120)
             _notifier.Alert($"Системное время изменено примерно на {drift.TotalMinutes:+0;-0} мин.");
 
         _lastWallUtc = nowUtc;
@@ -166,6 +197,10 @@ public sealed class EnforcementWorker : BackgroundService
 
     private void DetectTimeZoneChange(Schedule schedule)
     {
+        // TimeZoneInfo.Local (and the DateTime.Now that drives enforcement) are cached for the life of
+        // the process; without clearing that cache a time-zone change is never seen — neither this
+        // alert nor the schedule evaluation would react to it.
+        TimeZoneInfo.ClearCachedData();
         var tz = TimeZoneInfo.Local.Id;
         if (string.IsNullOrEmpty(schedule.LastTimeZoneId))
         {

@@ -25,6 +25,10 @@ public static class AppPaths
     /// guardian can re-create a deleted service in the SAME mode instead of defaulting to live.</summary>
     public static string ServiceModeFile => Path.Combine(RootDir, ".service_mode");
 
+    /// <summary>Last processed Telegram update id + 1, persisted so a restart doesn't replay commands
+    /// (re-run a /shutdown, double a /extra) that Telegram still holds as unconfirmed.</summary>
+    public static string TelegramOffsetFile => Path.Combine(RootDir, ".tg_offset");
+
     public static void EnsureRoot()
     {
         Directory.CreateDirectory(RootDir);
