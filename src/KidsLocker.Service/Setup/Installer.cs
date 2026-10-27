@@ -77,8 +77,11 @@ public static class Installer
         CreateTasks(dryRun, L);
 
         // 6) Start.
-        RunProcess("sc.exe", $"start {ServiceName}");
-        L("Служба запущена.");
+        var (startCode, startOut) = RunProcess("sc.exe", $"start {ServiceName}");
+        if (startCode == 0)
+            L("Служба запущена.");
+        else
+            L($"⚠ Служба создана, но не запустилась (sc.exe start, код {startCode}): {startOut}");
         L(dryRun ? "Режим ТЕСТ: реального выключения не будет." : "Режим БОЕВОЙ: выключение включено.");
     }
 
@@ -110,7 +113,10 @@ public static class Installer
         // Remember the mode so the guardian re-creates a deleted service identically (not always live).
         try { File.WriteAllText(AppPaths.ServiceModeFile, dryRun ? "dry" : "live"); } catch { /* best effort */ }
 
-        RunProcess("sc.exe", $"create {ServiceName} binPath= {ServiceControl.BuildBinPath(InstalledExe, dryRun)} start= auto obj= LocalSystem DisplayName= KidsLocker");
+        var (createCode, createOut) = RunProcess("sc.exe", $"create {ServiceName} binPath= {ServiceControl.BuildBinPath(InstalledExe, dryRun)} start= auto obj= LocalSystem DisplayName= KidsLocker");
+        if (createCode != 0)
+            throw new InvalidOperationException($"Не удалось создать службу (sc.exe create, код {createCode}): {createOut}");
+
         RunProcess("sc.exe", $"description {ServiceName} \"KidsLocker parental time control\"");
         RunProcess("sc.exe", $"failure {ServiceName} reset= 86400 actions= restart/5000/restart/5000/restart/5000");
         RunProcess("sc.exe", $"failureflag {ServiceName} 1");
@@ -129,10 +135,14 @@ public static class Installer
     /// </summary>
     private static void RegisterSafeBoot(Action<string> L)
     {
+        var ok = true;
         foreach (var set in new[] { "Minimal", "Network" })
-            RunProcess("reg.exe",
+        {
+            var (code, output) = RunProcess("reg.exe",
                 $"add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\{set}\\{ServiceName}\" /ve /t REG_SZ /d Service /f");
-        L("Служба включена и в безопасном режиме (Safe Mode).");
+            if (code != 0) { ok = false; L($"⚠ Safe Mode ({set}) не прописан (reg.exe, код {code}): {output}"); }
+        }
+        if (ok) L("Служба включена и в безопасном режиме (Safe Mode).");
     }
 
     private static void UnregisterSafeBoot()
@@ -218,18 +228,22 @@ public static class Installer
             TimeTriggerRepeating("PT10M"),
         });
 
-        RegisterTaskFromXml(GuardianTask, guardianXml);
-        RegisterTaskFromXml(EnforceTask, enforceXml);
-        L("Задачи планировщика созданы (guardian + enforce).");
+        var g = RegisterTaskFromXml(GuardianTask, guardianXml);
+        var e = RegisterTaskFromXml(EnforceTask, enforceXml);
+        if (g.ok && e.ok)
+            L("Задачи планировщика созданы (guardian + enforce).");
+        else
+            L($"⚠ Задачи планировщика созданы не полностью — guardian: {(g.ok ? "ок" : "ошибка")}, enforce: {(e.ok ? "ок" : "ошибка")}. {g.output} {e.output}".Trim());
     }
 
-    private static void RegisterTaskFromXml(string name, string xml)
+    private static (bool ok, string output) RegisterTaskFromXml(string name, string xml)
     {
         var tmp = Path.Combine(Path.GetTempPath(), $"kl-task-{Guid.NewGuid():N}.xml");
         File.WriteAllText(tmp, xml, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         try
         {
-            RunProcess("schtasks.exe", $"/create /tn \"{name}\" /xml \"{tmp}\" /f");
+            var (code, output) = RunProcess("schtasks.exe", $"/create /tn \"{name}\" /xml \"{tmp}\" /f");
+            return (code == 0, code == 0 ? "" : output);
         }
         finally
         {
@@ -241,8 +255,11 @@ public static class Installer
     {
         var dir = AppPaths.RootDir;
         // SYSTEM + Administrators full; Users read+execute; break inheritance.
-        RunProcess("icacls.exe", $"\"{dir}\" /inheritance:r /grant:r \"*S-1-5-18:(OI)(CI)F\" \"*S-1-5-32-544:(OI)(CI)F\" \"*S-1-5-32-545:(OI)(CI)RX\"");
-        L("ACL на папку данных установлены.");
+        var (code, output) = RunProcess("icacls.exe", $"\"{dir}\" /inheritance:r /grant:r \"*S-1-5-18:(OI)(CI)F\" \"*S-1-5-32-544:(OI)(CI)F\" \"*S-1-5-32-545:(OI)(CI)RX\"");
+        if (code == 0)
+            L("ACL на папку данных установлены.");
+        else
+            L($"⚠ ACL на папку данных не установлены (icacls.exe, код {code}): {output}");
     }
 
     // --- Task XML building ---

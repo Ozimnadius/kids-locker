@@ -58,7 +58,7 @@ public sealed class EnforcementWorker : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            try { Tick(); }
+            try { await TickAsync(stoppingToken); }
             catch (Exception ex) { _log.LogError(ex, "Enforcement tick failed"); }
 
             try { await Task.Delay(period, stoppingToken); }
@@ -66,7 +66,7 @@ public sealed class EnforcementWorker : BackgroundService
         }
     }
 
-    private void Tick()
+    private async Task TickAsync(CancellationToken ct)
     {
         // Auxiliary steps run in their own guards: a failure in any of them (e.g. the schedule file
         // was made read-only, so the tamper-revert write throws) must NEVER skip the critical
@@ -103,7 +103,13 @@ public sealed class EnforcementWorker : BackgroundService
             {
                 var who = SessionQuery.ActiveConsoleUser();
                 var whoTxt = who is null ? "" : $" (сеанс: {who})";
-                _notifier.Alert($"Запрещённое время{whoTxt}. Выключаю компьютер. [{now:HH:mm}]");
+                // Deliver the alert BEFORE the forced shutdown tears down the network — but cap the
+                // wait so an unreachable Telegram can't postpone enforcement. AlertAsync writes the
+                // local log/event synchronously first, so that record survives regardless.
+                using var alertCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                alertCts.CancelAfter(TimeSpan.FromSeconds(10));
+                try { await _notifier.AlertAsync($"Запрещённое время{whoTxt}. Выключаю компьютер. [{now:HH:mm}]", alertCts.Token); }
+                catch (Exception ex) { _log.LogError(ex, "Pre-shutdown alert failed"); }
             }
             _enforcer.ShutdownNow(eval.Reason);
         }
