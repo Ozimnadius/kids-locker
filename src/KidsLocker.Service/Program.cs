@@ -21,21 +21,21 @@ internal static class Program
         var a = args ?? Array.Empty<string>();
         bool Has(string flag) => a.Any(x => string.Equals(x, flag, StringComparison.OrdinalIgnoreCase));
 
-        // One-shot helper modes used by the installer and the scheduled tasks.
+        // Разовые служебные режимы для установщика и задач планировщика.
         if (Has("--install-eventsource")) { WindowsEventLog.EnsureSource(); return 0; }
         if (Has("--enforce-once")) { EnforceOnce(a).GetAwaiter().GetResult(); return 0; }
         if (Has("--guard")) { Guard(a).GetAwaiter().GetResult(); return 0; }
         if (Has("--test-telegram")) { return TestTelegram(a).GetAwaiter().GetResult(); }
         if (Has("--telegram-updates")) { return TelegramUpdates(a).GetAwaiter().GetResult(); }
 
-        // Service host (as a Windows service, or --console for debugging).
+        // Хост службы (как служба Windows или --console для отладки).
         if (WindowsServiceHelpers.IsWindowsService() || Has("--console"))
         {
             RunHost(a);
             return 0;
         }
 
-        // Double-clicked / interactive with no flags → the admin GUI.
+        // Двойной клик / интерактивный запуск без флагов → GUI-пульт родителя.
         return RunGui();
     }
 
@@ -65,7 +65,7 @@ internal static class Program
         builder.Services.AddSingleton(config);
         builder.Services.AddSingleton<ScheduleStore>();
         builder.Services.AddSingleton(sp => new Notifier(sp.GetRequiredService<ILogger<Notifier>>(), config, telegram));
-        builder.Services.AddSingleton(sp => new Enforcer(sp.GetRequiredService<ILogger<Enforcer>>(), sp.GetRequiredService<Notifier>(), live));
+        builder.Services.AddSingleton(sp => new Enforcer(sp.GetRequiredService<ILogger<Enforcer>>(), live));
         builder.Services.AddSingleton(sp => new CommandHandler(sp.GetRequiredService<ScheduleStore>(), sp.GetRequiredService<Enforcer>()));
         builder.Services.AddHostedService<EnforcementWorker>();
         builder.Services.AddHostedService<StopAlertService>();
@@ -79,7 +79,7 @@ internal static class Program
         builder.Build().Run();
     }
 
-    // --- helpers shared by CLI modes ---
+    // --- общие помощники для CLI-режимов ---
 
     private static bool ComputeLive(string[] a)
     {
@@ -118,7 +118,7 @@ internal static class Program
         var (notifier, http) = BuildNotifier(cfg, lf);
 
         var store = new ScheduleStore();
-        var enforcer = new Enforcer(lf.CreateLogger<Enforcer>(), notifier, live);
+        var enforcer = new Enforcer(lf.CreateLogger<Enforcer>(), live);
 
         var eval = ScheduleEvaluator.Evaluate(store.Load(), DateTime.Now);
         lf.CreateLogger("enforce-once").LogInformation("blocked={Blocked} ({Reason}), live={Live}", eval.Blocked, eval.Reason, live);

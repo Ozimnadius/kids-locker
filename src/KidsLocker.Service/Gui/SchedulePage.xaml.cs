@@ -6,7 +6,6 @@ using System.Windows.Media;
 using KidsLocker.Service.Config;
 using KidsLocker.Service.Enforcement;
 using KidsLocker.Service.Scheduling;
-using KidsLocker.Service.Setup;
 
 namespace KidsLocker.Service.Gui;
 
@@ -198,13 +197,21 @@ public sealed partial class SchedulePage : UserControl, IPage
             return;
 
         ActionInfo.Hide();
-        (int code, string output) result = default;
+
+        // В тестовом режиме служба ничего не выключает — и кнопка пульта тоже не должна, иначе
+        // проверка внезапно гасит ПК. Честно сообщаем об этом вместо выключения.
+        if (ServiceControl.InstalledDryRun())
+        {
+            ActionInfo.Show(InfoSeverity.Info,
+                "Служба в тестовом режиме — реальное выключение отключено. Переустановите в боевом режиме, чтобы выключать по-настоящему.");
+            return;
+        }
+
+        // Тот же общий путь выключения, что и у службы (shutdown.exe с запасным P/Invoke).
         var error = await _shell.RunAsync("Выключаю компьютер…",
-            () => Task.Run(() => result = Installer.RunProcess("shutdown.exe", "/s /f /t 0")), critical: false);
+            () => Task.Run(() => NativeShutdown.Force("KidsLocker: выключение из пульта")), critical: false);
         if (error is not null)
             ActionInfo.Show(InfoSeverity.Error, "Ошибка: " + error.Message);
-        else if (result.code != 0)
-            ActionInfo.Show(InfoSeverity.Error, $"Компьютер не выключился (код {result.code}). {result.output}".Trim());
     }
 
     /// <summary>

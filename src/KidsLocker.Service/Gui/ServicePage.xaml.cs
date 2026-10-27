@@ -70,7 +70,7 @@ public sealed partial class ServicePage : UserControl, IPage
         Log.Clear();
         AppendLog("Удаление...");
         var error = await _shell.RunAsync("Удаляю KidsLocker…",
-            () => Task.Run(() => Installer.Uninstall(keepData: false, AppendLog)), critical: true);
+            () => Task.Run(() => Installer.Uninstall(AppendLog)), critical: true);
         AppendLog(error is null ? "Готово." : "ОШИБКА: " + error.Message);
         _shell.RefreshServiceStatus();
     }

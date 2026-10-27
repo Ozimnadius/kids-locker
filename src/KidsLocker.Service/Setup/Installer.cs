@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Security.Principal;
 using System.Text;
@@ -9,10 +8,11 @@ using KidsLocker.Service.Notifications;
 namespace KidsLocker.Service.Setup;
 
 /// <summary>
-/// Installs / removes KidsLocker entirely from code (no external scripts), so the GUI can
-/// do everything with buttons. Copies this exe into Program Files, registers the service and
-/// the redundant SYSTEM scheduled tasks, sets folder ACLs, and registers the Event Log source.
-/// All steps require the current process to be elevated (the GUI declares requireAdministrator).
+/// Ставит и удаляет KidsLocker целиком из кода (без внешних скриптов), чтобы пульт мог делать
+/// всё кнопками. Копирует этот exe в Program Files, регистрирует службу и дублирующие задачи
+/// планировщика от SYSTEM, задаёт ACL на папку и регистрирует источник журнала событий.
+/// Все шаги требуют, чтобы текущий процесс был запущен с повышением прав (пульт объявляет
+/// requireAdministrator).
 /// </summary>
 [SupportedOSPlatform("windows")]
 public static class Installer
@@ -36,11 +36,7 @@ public static class Installer
         catch { return false; }
     }
 
-    public static ServiceControl.State ServiceState() => ServiceControl.GetState();
-
-    public static bool IsInstalled() => ServiceControl.GetState() != ServiceControl.State.Missing;
-
-    /// <summary>Full install. <paramref name="log"/> receives progress lines for the GUI.</summary>
+    /// <summary>Полная установка. <paramref name="log"/> получает строки прогресса для пульта.</summary>
     public static void Install(bool dryRun, Action<string>? log = null)
     {
         void L(string m) => log?.Invoke(m);
@@ -48,12 +44,12 @@ public static class Installer
 
         var source = Environment.ProcessPath ?? throw new InvalidOperationException("Не удалось определить путь к exe.");
 
-        // Free the installed exe BEFORE copying over it: remove the tasks (so the guardian
-        // can't revive the service mid-install), then stop and delete the running service.
+        // Освобождаем установленный exe ПЕРЕД записью поверх него: сначала убираем задачи (чтобы
+        // хранитель не воскресил службу посреди установки), затем останавливаем и удаляем службу.
         RemoveTasks();
         StopAndDeleteService(L);
 
-        // 1) Copy this exe into Program Files (skip if we are already running from there).
+        // 1) Копируем этот exe в Program Files (пропускаем, если уже запущены оттуда).
         Directory.CreateDirectory(InstallDir);
         if (!string.Equals(Path.GetFullPath(source), Path.GetFullPath(InstalledExe), StringComparison.OrdinalIgnoreCase))
         {
@@ -61,22 +57,22 @@ public static class Installer
             L($"Скопирован exe → {InstalledExe}");
         }
 
-        // 2) Data folder + ACL.
+        // 2) Папка данных + ACL.
         AppPaths.EnsureRoot();
         LockDownDataFolder(L);
 
-        // 3) Event Log source.
+        // 3) Источник журнала событий.
         try { WindowsEventLog.EnsureSource(); L("Источник журнала зарегистрирован."); }
         catch (Exception ex) { L("Журнал (не критично): " + ex.Message); }
 
-        // 4) Service.
+        // 4) Служба.
         CreateService(dryRun, L);
         RegisterSafeBoot(L);
 
-        // 5) Scheduled tasks.
+        // 5) Задачи планировщика.
         CreateTasks(dryRun, L);
 
-        // 6) Start.
+        // 6) Запуск.
         var (startCode, startOut) = RunProcess("sc.exe", $"start {ServiceName}");
         if (startCode == 0)
             L("Служба запущена.");
@@ -85,24 +81,21 @@ public static class Installer
         L(dryRun ? "Режим ТЕСТ: реального выключения не будет." : "Режим БОЕВОЙ: выключение включено.");
     }
 
-    public static void Uninstall(bool keepData, Action<string>? log = null)
+    public static void Uninstall(Action<string>? log = null)
     {
         void L(string m) => log?.Invoke(m);
         if (!IsElevated()) throw new InvalidOperationException("Требуются права администратора.");
 
-        // Stop the service first so it can't self-heal (recreate tasks/keys) while we remove them.
+        // Сначала останавливаем службу, чтобы она не самовосстановилась (пересоздала задачи/ключи), пока мы их убираем.
         RemoveTasks();
         StopAndDeleteService(L);
-        RemoveTasks();          // again, in case the service recreated a task during the stop window
+        RemoveTasks();          // ещё раз — вдруг служба пересоздала задачу в окне остановки
         UnregisterSafeBoot();
         L("Служба и задачи удалены.");
 
         try { if (Directory.Exists(InstallDir)) Directory.Delete(InstallDir, recursive: true); } catch { }
-        if (!keepData)
-        {
-            try { if (Directory.Exists(AppPaths.RootDir)) Directory.Delete(AppPaths.RootDir, recursive: true); } catch { }
-            L("Данные удалены.");
-        }
+        try { if (Directory.Exists(AppPaths.RootDir)) Directory.Delete(AppPaths.RootDir, recursive: true); } catch { }
+        L("Данные удалены.");
     }
 
     private static void CreateService(bool dryRun, Action<string> L)
@@ -110,8 +103,8 @@ public static class Installer
         if (ServiceControl.GetState() != ServiceControl.State.Missing)
             RunProcess("sc.exe", $"delete {ServiceName}");
 
-        // Remember the mode so the guardian re-creates a deleted service identically (not always live).
-        try { File.WriteAllText(AppPaths.ServiceModeFile, dryRun ? "dry" : "live"); } catch { /* best effort */ }
+        // Запоминаем режим, чтобы хранитель пересоздал удалённую службу так же (не всегда боевой).
+        try { File.WriteAllText(AppPaths.ServiceModeFile, dryRun ? "dry" : "live"); } catch { /* по возможности */ }
 
         var (createCode, createOut) = RunProcess("sc.exe", $"create {ServiceName} binPath= {ServiceControl.BuildBinPath(InstalledExe, dryRun)} start= auto obj= LocalSystem DisplayName= KidsLocker");
         if (createCode != 0)
@@ -130,8 +123,8 @@ public static class Installer
     }
 
     /// <summary>
-    /// Make the service start in Safe Mode too, by listing it under the SafeBoot control keys.
-    /// Without this, third-party services don't run in Safe Mode — a common bypass.
+    /// Заставить службу запускаться и в безопасном режиме (Safe Mode), прописав её под ключами
+    /// управления SafeBoot. Без этого сторонние службы в Safe Mode не работают — типичный обход.
     /// </summary>
     private static void RegisterSafeBoot(Action<string> L)
     {
@@ -153,10 +146,10 @@ public static class Installer
     }
 
     /// <summary>
-    /// Self-heal: called periodically by the running service (as SYSTEM). Recreates the
-    /// scheduled tasks and Safe Mode registration if they were deleted. Returns a description
-    /// of what was restored (empty string if nothing), so the caller can alert the parent.
-    /// The service itself is kept alive by the guardian task and SCM recovery.
+    /// Самовосстановление: периодически вызывается работающей службой (от SYSTEM). Пересоздаёт
+    /// задачи планировщика и запись Safe Mode, если их удалили. Возвращает описание того, что
+    /// восстановлено (пустая строка, если ничего), чтобы вызывающий код мог оповестить родителя.
+    /// Саму службу поддерживают живой задача-хранитель и восстановление SCM.
     /// </summary>
     public static string EnsureHardening(bool dryRun)
     {
@@ -183,12 +176,12 @@ public static class Installer
     private static bool SafeBootExists(string set) =>
         RunProcess("reg.exe", $"query \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\{set}\\{ServiceName}\"").code == 0;
 
-    /// <summary>Stop and remove the service, waiting for the SCM to drop it and the process to exit.</summary>
+    /// <summary>Остановить и удалить службу, дождавшись, пока SCM её отпустит, а процесс завершится.</summary>
     private static void StopAndDeleteService(Action<string> L)
     {
         if (ServiceControl.GetState() == ServiceControl.State.Missing) return;
 
-        StopMarker.WriteExpected(); // our stop — don't trigger the "control stopped" alert
+        StopMarker.WriteExpected(); // наш стоп — не поднимаем алерт «контроль остановлен»
         ServiceControl.TryStop();
         RunProcess("sc.exe", $"delete {ServiceName}");
         for (var i = 0; i < 20 && ServiceControl.GetState() != ServiceControl.State.Missing; i++)
@@ -197,8 +190,8 @@ public static class Installer
     }
 
     /// <summary>
-    /// Copy the exe, retrying briefly: right after the service is deleted its process may still
-    /// hold the file handle for a moment, which would otherwise throw "used by another process".
+    /// Копировать exe с короткими повторами: сразу после удаления службы её процесс ещё может
+    /// на мгновение держать дескриптор файла, из-за чего иначе было бы «занято другим процессом».
     /// </summary>
     private static void CopyWithRetry(string source, string dest)
     {
@@ -254,7 +247,7 @@ public static class Installer
     private static void LockDownDataFolder(Action<string> L)
     {
         var dir = AppPaths.RootDir;
-        // SYSTEM + Administrators full; Users read+execute; break inheritance.
+        // SYSTEM + администраторы — полный доступ; пользователи — чтение+выполнение; наследование разорвано.
         var (code, output) = RunProcess("icacls.exe", $"\"{dir}\" /inheritance:r /grant:r \"*S-1-5-18:(OI)(CI)F\" \"*S-1-5-32-544:(OI)(CI)F\" \"*S-1-5-32-545:(OI)(CI)RX\"");
         if (code == 0)
             L("ACL на папку данных установлены.");
@@ -262,7 +255,7 @@ public static class Installer
             L($"⚠ ACL на папку данных не установлены (icacls.exe, код {code}): {output}");
     }
 
-    // --- Task XML building ---
+    // --- Сборка XML задачи ---
 
     private static string TaskXml(string command, string arguments, IEnumerable<string> triggers)
     {
@@ -305,30 +298,8 @@ public static class Installer
         .Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;")
         .Replace("\"", "&quot;").Replace("'", "&apos;");
 
-    // --- process helper ---
+    // --- Запуск процессов ---
 
-    public static (int code, string output) RunProcess(string file, string arguments)
-    {
-        try
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = file,
-                Arguments = arguments,
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
-            using var p = Process.Start(psi)!;
-            var so = p.StandardOutput.ReadToEnd();
-            var se = p.StandardError.ReadToEnd();
-            p.WaitForExit(30000);
-            return (p.ExitCode, (so + se).Trim());
-        }
-        catch (Exception ex)
-        {
-            return (-1, ex.Message);
-        }
-    }
+    private static (int code, string output) RunProcess(string file, string arguments) =>
+        ProcessRunner.Run(file, arguments);
 }

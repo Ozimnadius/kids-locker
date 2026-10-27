@@ -6,11 +6,11 @@ using Microsoft.Extensions.Hosting;
 namespace KidsLocker.Service;
 
 /// <summary>
-/// Sends a Telegram alert when the service is stopped in a way that is NOT a normal Windows
-/// shutdown and NOT initiated by the app itself — i.e. when someone deliberately stops the
-/// control. Runs in the host's stop path (StopAsync is awaited), so the alert gets out before
-/// the process exits. A forced kill (taskkill /f) skips this, but the guardian task still
-/// reports it within a minute.
+/// Шлёт алерт в Telegram, когда службу остановили не обычным выключением Windows и не сама
+/// программа — то есть когда контроль намеренно остановил кто-то. Работает в stop-пути хоста
+/// (StopAsync дожидаются), поэтому алерт успевает уйти до выхода процесса. Принудительное
+/// убийство (taskkill /f) этот путь пропускает, но задача-хранитель всё равно сообщит об этом
+/// в течение минуты.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class StopAlertService : IHostedService
@@ -25,10 +25,10 @@ public sealed class StopAlertService : IHostedService
     {
         try
         {
-            if (SystemBootMode.IsSystemShuttingDown) return; // OS shutting down (incl. bedtime shutdown)
-            if (StopMarker.ConsumeIsExpected()) return;       // the app stopped us on purpose
-            await _notifier.AlertAsync("⚠ Контроль KidsLocker выключен: службу остановили.");
+            if (SystemBootMode.IsSystemShuttingDown) return; // ОС выключается (в т.ч. плановое выключение на ночь)
+            if (StopMarker.ConsumeIsExpected()) return;       // службу остановила сама программа
+            await _notifier.AlertAsync("Контроль KidsLocker выключен: службу остановили.");
         }
-        catch { /* never let the stop path throw */ }
+        catch { /* stop-путь не должен бросать исключения */ }
     }
 }
