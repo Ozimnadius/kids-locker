@@ -22,6 +22,7 @@ public sealed class ScheduleStore
 
     private Schedule? _current;
     private string _lastHash = "";
+    private string _lastAlertedTamperHash = "";
 
     /// <summary>A defensive copy of the current schedule (safe to read/enumerate freely).</summary>
     public Schedule Get()
@@ -83,8 +84,23 @@ public sealed class ScheduleStore
             if (diskHash == _lastHash)
                 return false;
 
-            WriteToDisk(_current!); // revert to authoritative copy
-            return true;
+            // Revert to the authoritative copy. If the write fails (file locked, read-only, or a
+            // directory put in its place), enforcement must NOT be affected: the loop evaluates the
+            // in-memory authoritative schedule, not the on-disk file, so a failed revert can't disable
+            // blocking. We only need to avoid throwing (which would abort the tick) and avoid alert spam.
+            try
+            {
+                WriteToDisk(_current!);
+                _lastAlertedTamperHash = "";
+                return true;
+            }
+            catch
+            {
+                if (diskHash == _lastAlertedTamperHash)
+                    return false; // already alerted for this exact tampered content
+                _lastAlertedTamperHash = diskHash;
+                return true;
+            }
         }
     }
 
@@ -99,6 +115,9 @@ public sealed class ScheduleStore
                 var s = JsonSerializer.Deserialize<Schedule>(json, JsonOpts);
                 if (s is not null)
                 {
+                    // Explicit nulls in the JSON ("Allowed": null) would otherwise crash evaluation.
+                    s.Allowed ??= new();
+                    s.Extras ??= new();
                     _current = s;
                     _lastHash = Hash(json); // baseline = actual disk content
                     return;

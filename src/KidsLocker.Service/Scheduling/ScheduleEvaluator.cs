@@ -36,18 +36,21 @@ public static class ScheduleEvaluator
     public static IEnumerable<(TimeSpan From, TimeSpan To)> AllowedFor(Schedule s, DateTime localDate)
     {
         var dayKey = Schedule.KeyFor(localDate.DayOfWeek);
-        if (s.Allowed.TryGetValue(dayKey, out var intervals) && intervals is not null)
+        if (s.Allowed is not null && s.Allowed.TryGetValue(dayKey, out var intervals) && intervals is not null)
         {
             foreach (var iv in intervals)
                 if (TryRange(iv.From, iv.To, out var r))
                     yield return r;
         }
 
-        var dateStr = localDate.ToString("yyyy-MM-dd");
-        foreach (var ex in s.Extras)
-            if (string.Equals(ex.Date, dateStr, StringComparison.Ordinal)
-                && TryRange(ex.From, ex.To, out var r))
-                yield return r;
+        if (s.Extras is not null)
+        {
+            var dateStr = localDate.ToString("yyyy-MM-dd");
+            foreach (var ex in s.Extras)
+                if (string.Equals(ex.Date, dateStr, StringComparison.Ordinal)
+                    && TryRange(ex.From, ex.To, out var r))
+                    yield return r;
+        }
     }
 
     private static bool TryRange(string from, string to, out (TimeSpan From, TimeSpan To) range)

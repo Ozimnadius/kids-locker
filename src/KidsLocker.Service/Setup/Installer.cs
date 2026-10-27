@@ -107,8 +107,10 @@ public static class Installer
         if (ServiceControl.GetState() != ServiceControl.State.Missing)
             RunProcess("sc.exe", $"delete {ServiceName}");
 
-        var bin = dryRun ? $"\"{InstalledExe}\" --dry-run" : $"\"{InstalledExe}\"";
-        RunProcess("sc.exe", $"create {ServiceName} binPath= \"{bin}\" start= auto obj= LocalSystem DisplayName= KidsLocker");
+        // Remember the mode so the guardian re-creates a deleted service identically (not always live).
+        try { File.WriteAllText(AppPaths.ServiceModeFile, dryRun ? "dry" : "live"); } catch { /* best effort */ }
+
+        RunProcess("sc.exe", $"create {ServiceName} binPath= {ServiceControl.BuildBinPath(InstalledExe, dryRun)} start= auto obj= LocalSystem DisplayName= KidsLocker");
         RunProcess("sc.exe", $"description {ServiceName} \"KidsLocker parental time control\"");
         RunProcess("sc.exe", $"failure {ServiceName} reset= 86400 actions= restart/5000/restart/5000/restart/5000");
         RunProcess("sc.exe", $"failureflag {ServiceName} 1");

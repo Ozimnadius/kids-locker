@@ -68,12 +68,31 @@ public sealed class EnforcementWorker : BackgroundService
 
     private void Tick()
     {
-        if (_store.SyncAndDetectTamper())
-            _notifier.Alert("Файл расписания был изменён вручную — восстановил прежний. Проверьте /status.");
+        // Auxiliary steps run in their own guards: a failure in any of them (e.g. the schedule file
+        // was made read-only, so the tamper-revert write throws) must NEVER skip the critical
+        // evaluate-and-shut-down path below — that is exactly what would silently disable the control.
+        try
+        {
+            if (_store.SyncAndDetectTamper())
+                _notifier.Alert("Файл расписания был изменён вручную — восстановил прежний. Проверьте /status.");
+        }
+        catch (Exception ex) { _log.LogError(ex, "Schedule tamper check failed"); }
 
-        var schedule = _store.Get();
-        DetectClockJump();
-        DetectTimeZoneChange(schedule);
+        Schedule schedule;
+        try
+        {
+            schedule = _store.Get();
+        }
+        catch (Exception ex)
+        {
+            // The store should never throw here, but if it does, fall back to the strict default
+            // (which blocks at night) rather than letting the tick abort and skip enforcement.
+            _log.LogError(ex, "Schedule load failed; falling back to default");
+            schedule = Schedule.Default();
+        }
+
+        try { DetectClockJump(); } catch (Exception ex) { _log.LogError(ex, "Clock-jump check failed"); }
+        try { DetectTimeZoneChange(schedule); } catch (Exception ex) { _log.LogError(ex, "Time-zone check failed"); }
 
         var now = DateTime.Now;
         var eval = ScheduleEvaluator.Evaluate(schedule, now);
