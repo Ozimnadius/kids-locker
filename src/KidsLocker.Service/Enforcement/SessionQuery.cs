@@ -4,9 +4,9 @@ using System.Runtime.Versioning;
 namespace KidsLocker.Service.Enforcement;
 
 /// <summary>
-/// Reads who is currently sitting at the physical console, so alerts can say
-/// "logged in as &lt;user&gt;" instead of just "blocked". Best-effort: returns null if the
-/// info is unavailable (e.g. at the sign-in screen with no active user).
+/// Узнаёт, кто сейчас сидит за физической консолью, чтобы алерты могли сказать
+/// «вошёл как &lt;пользователь&gt;», а не просто «заблокировано». По возможности: возвращает null, если
+/// сведения недоступны (например, на экране входа, когда активного пользователя нет).
 /// </summary>
 [SupportedOSPlatform("windows")]
 public static class SessionQuery

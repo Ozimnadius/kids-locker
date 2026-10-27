@@ -13,9 +13,9 @@ using Microsoft.Extensions.Logging;
 namespace KidsLocker.Service;
 
 /// <summary>
-/// The steady-state enforcement loop. Every few seconds it re-reads the schedule, checks
-/// for clock/time-zone tampering, and — if the current moment is a blocked window —
-/// forces a shutdown. Runs inside the LocalSystem service and as <c>--console</c>/<c>--dry-run</c>.
+/// Основной цикл контроля. Каждые несколько секунд перечитывает расписание, проверяет,
+/// не подкручивали ли часы или часовой пояс, и — если сейчас запрещённое время —
+/// принудительно выключает компьютер. Работает внутри службы LocalSystem, а также в режимах <c>--console</c>/<c>--dry-run</c>.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class EnforcementWorker : BackgroundService
@@ -57,11 +57,11 @@ public sealed class EnforcementWorker : BackgroundService
         _lastWallUtc = DateTime.UtcNow;
         _lastStamp = Stopwatch.GetTimestamp();
 
-        // Waking from sleep/hibernation jumps the wall clock while the monotonic timer stood still,
-        // which the clock-jump detector would otherwise misread as "time changed". Note the resume so
-        // the next check is skipped. Best-effort: if the power event can't be hooked here, behaviour
-        // is simply unchanged (the pre-existing false alert).
-        try { SystemEvents.PowerModeChanged += OnPowerModeChanged; } catch { /* no message pump available */ }
+        // При выходе из сна/гибернации системные часы прыгают вперёд, а монотонный таймер стоял на месте,
+        // и детектор скачков времени иначе принял бы это за «время изменили». Запоминаем пробуждение,
+        // чтобы пропустить следующую проверку. По возможности: если подписаться на событие питания
+        // здесь не удалось, поведение просто остаётся прежним (с тем же ложным алертом, что и раньше).
+        try { SystemEvents.PowerModeChanged += OnPowerModeChanged; } catch { /* нет цикла обработки сообщений */ }
 
         var period = TimeSpan.FromSeconds(Math.Clamp(_config.PollSeconds, 3, 120));
         try
@@ -88,9 +88,10 @@ public sealed class EnforcementWorker : BackgroundService
 
     private async Task TickAsync(CancellationToken ct)
     {
-        // Auxiliary steps run in their own guards: a failure in any of them (e.g. the schedule file
-        // was made read-only, so the tamper-revert write throws) must NEVER skip the critical
-        // evaluate-and-shut-down path below — that is exactly what would silently disable the control.
+        // Вспомогательные шаги обёрнуты каждый в свою защиту: сбой любого из них (например, файл
+        // расписания сделали только для чтения и запись при откате подмены бросает исключение) НИКОГДА
+        // не должен пропустить критичный путь «оценить и выключить» ниже — именно так контроль
+        // тихо отключился бы.
         try
         {
             if (_store.SyncAndDetectTamper())
@@ -105,8 +106,8 @@ public sealed class EnforcementWorker : BackgroundService
         }
         catch (Exception ex)
         {
-            // The store should never throw here, but if it does, fail safe to blocking everything
-            // (Enabled, no allowed intervals) rather than relaxing enforcement or aborting the tick.
+            // Хранилище не должно здесь бросать исключения, но если бросит — безопасно блокируем всё
+            // (Enabled, без разрешённых интервалов), а не ослабляем контроль и не прерываем такт.
             _log.LogError(ex, "Schedule load failed; blocking until it can be read");
             schedule = new Schedule { Enabled = true };
         }
@@ -129,9 +130,9 @@ public sealed class EnforcementWorker : BackgroundService
             {
                 var who = SessionQuery.ActiveConsoleUser();
                 var whoTxt = who is null ? "" : $" (сеанс: {who})";
-                // Deliver the alert BEFORE the forced shutdown tears down the network — but cap the
-                // wait so an unreachable Telegram can't postpone enforcement. AlertAsync writes the
-                // local log/event synchronously first, so that record survives regardless.
+                // Доставляем алерт ДО того, как принудительное выключение оборвёт сеть, — но ограничиваем
+                // ожидание, чтобы недоступный Telegram не откладывал выключение. AlertAsync сначала
+                // синхронно пишет в локальный лог и журнал событий, так что эта запись сохранится в любом случае.
                 using var alertCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 alertCts.CancelAfter(TimeSpan.FromSeconds(10));
                 try { await _notifier.AlertAsync($"Запрещённое время{whoTxt}. Выключаю компьютер. [{now:HH:mm}]", alertCts.Token); }
@@ -150,14 +151,14 @@ public sealed class EnforcementWorker : BackgroundService
     }
 
     /// <summary>
-    /// Periodically (as the installed service) re-assert the scheduled tasks and Safe Mode
-    /// registration, recreating anything that was deleted and alerting the parent. Combined
-    /// with the guardian task reviving the service, dismantling requires removing every piece
-    /// faster than this cycle — much harder than deleting one thing.
+    /// Периодически (когда работает как установленная служба) заново утверждает задачи планировщика
+    /// и регистрацию в безопасном режиме: пересоздаёт всё удалённое и предупреждает родителя. Вместе
+    /// с задачей-стражем, которая поднимает службу, это значит, что для разборки защиты нужно убрать
+    /// все её части быстрее этого цикла — куда сложнее, чем удалить что-то одно.
     /// </summary>
     private void SelfHeal()
     {
-        if (!WindowsServiceHelpers.IsWindowsService()) return; // never touch tasks/registry in dev/console runs
+        if (!WindowsServiceHelpers.IsWindowsService()) return; // при запуске разработчиком или в консоли задачи и реестр не трогаем
         if (DateTime.UtcNow - _lastHardenUtc < TimeSpan.FromMinutes(5)) return;
 
         _lastHardenUtc = DateTime.UtcNow;
@@ -173,7 +174,7 @@ public sealed class EnforcementWorker : BackgroundService
         }
     }
 
-    /// <summary>Compare wall-clock delta against a monotonic timer to spot clock tampering.</summary>
+    /// <summary>Сравнивает приращение системных часов с монотонным таймером, чтобы заметить подкрутку часов.</summary>
     private void DetectClockJump()
     {
         var nowUtc = DateTime.UtcNow;
@@ -183,8 +184,8 @@ public sealed class EnforcementWorker : BackgroundService
         var wall = nowUtc - _lastWallUtc;
         var drift = wall - monotonic;
 
-        // Just resumed from sleep/hibernation: the gap is real elapsed time the monotonic timer
-        // (Stopwatch/QPC) did not count, not a clock change. Skip this one comparison and re-baseline.
+        // Только что вышли из сна/гибернации: разрыв — это реально прошедшее время, которое монотонный
+        // таймер (Stopwatch/QPC) не учёл, а не смена часов. Пропускаем это сравнение и берём новую точку отсчёта.
         var justResumed = _resumedSinceLastTick;
         _resumedSinceLastTick = false;
 
@@ -197,9 +198,9 @@ public sealed class EnforcementWorker : BackgroundService
 
     private void DetectTimeZoneChange(Schedule schedule)
     {
-        // TimeZoneInfo.Local (and the DateTime.Now that drives enforcement) are cached for the life of
-        // the process; without clearing that cache a time-zone change is never seen — neither this
-        // alert nor the schedule evaluation would react to it.
+        // TimeZoneInfo.Local (и DateTime.Now, по которому работает контроль) кэшируются на всё время
+        // жизни процесса; без сброса этого кэша смена часового пояса не будет замечена — на неё не
+        // отреагирует ни этот алерт, ни оценка расписания.
         TimeZoneInfo.ClearCachedData();
         var tz = TimeZoneInfo.Local.Id;
         if (string.IsNullOrEmpty(schedule.LastTimeZoneId))

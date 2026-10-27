@@ -3,18 +3,18 @@ using System.Globalization;
 namespace KidsLocker.Service.Scheduling;
 
 /// <summary>
-/// Parsing helpers for "HH:mm" interval endpoints. Kept separate and pure so the
-/// scheduling logic is fully unit-testable without any Windows dependency.
+/// Помощники разбора границ интервалов "HH:mm". Вынесены отдельно и без побочных эффектов, чтобы
+/// логику расписания можно было полностью покрыть модульными тестами без зависимости от Windows.
 /// </summary>
 public static class TimeParsing
 {
-    /// <summary>Full day as a TimeSpan; used as the exclusive upper bound "24:00".</summary>
+    /// <summary>Целые сутки в виде TimeSpan; используется как невключаемая верхняя граница "24:00".</summary>
     public static readonly TimeSpan EndOfDay = TimeSpan.FromDays(1);
 
     /// <summary>
-    /// Parse "HH:mm" (or "H:mm") into a TimeSpan offset from midnight.
-    /// The special value "24:00" maps to <see cref="EndOfDay"/> so an interval can
-    /// run to the very end of the day. Throws <see cref="FormatException"/> on garbage.
+    /// Разобрать "HH:mm" (или "H:mm") в TimeSpan — смещение от полуночи.
+    /// Особое значение "24:00" превращается в <see cref="EndOfDay"/>, чтобы интервал мог
+    /// длиться до самого конца дня. На мусоре бросает <see cref="FormatException"/>.
     /// </summary>
     public static TimeSpan Parse(string value)
     {

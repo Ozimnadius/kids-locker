@@ -4,9 +4,9 @@ using System.Runtime.Versioning;
 namespace KidsLocker.Service.Notifications;
 
 /// <summary>
-/// Thin, best-effort wrapper over the Windows Event Log. Creating the event source
-/// requires admin (done once by the installer); if it is missing we silently no-op so
-/// nothing crashes when running unelevated on a dev machine.
+/// Тонкая обёртка «по возможности» над журналом событий Windows. Создание источника событий
+/// требует прав администратора (делает установщик один раз); если источника нет, молча ничего
+/// не делаем, чтобы ничего не падало при запуске без повышения прав на машине разработчика.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public static class WindowsEventLog
@@ -19,16 +19,16 @@ public static class WindowsEventLog
         try
         {
             if (!EventLog.SourceExists(Source))
-                return; // source not registered (needs admin) — skip quietly
+                return; // источник не зарегистрирован (нужны права администратора) — тихо пропускаем
             EventLog.WriteEntry(Source, message, type);
         }
         catch
         {
-            // Never let logging failures affect enforcement.
+            // Сбои логирования никогда не должны влиять на контроль.
         }
     }
 
-    /// <summary>Called by the installer (elevated) to register the event source once.</summary>
+    /// <summary>Вызывается установщиком (с повышенными правами), чтобы один раз зарегистрировать источник событий.</summary>
     public static void EnsureSource()
     {
         if (!EventLog.SourceExists(Source))

@@ -6,10 +6,10 @@ using KidsLocker.Service.Config;
 namespace KidsLocker.Service.Scheduling;
 
 /// <summary>
-/// Authoritative in-memory schedule, mirrored to schedule.json under %ProgramData%\KidsLocker.
-/// The service (enforcement loop + Telegram handler) is the only legitimate writer. Any edit
-/// to the file made outside the app is detected via a content hash and reverted, so an admin
-/// user can't silently flip "Enabled":false in Notepad. Thread-safe; writes are atomic.
+/// Эталонное расписание в памяти, зеркалируемое в schedule.json в %ProgramData%\KidsLocker.
+/// Служба (цикл контроля + обработчик Telegram) — единственный законный писатель. Любая правка
+/// файла в обход приложения обнаруживается по хэшу содержимого и откатывается, так что
+/// пользователь-администратор не может тихо выставить "Enabled":false в Блокноте. Потокобезопасно; запись атомарная.
 /// </summary>
 public sealed class ScheduleStore
 {
@@ -24,11 +24,11 @@ public sealed class ScheduleStore
     private string _lastHash = "";
     private string _lastAlertedTamperHash = "";
 
-    /// <summary>True when the last load found the schedule file present but unreadable/corrupt and
-    /// fell back to blocking everything. The enforcement worker surfaces this to the parent.</summary>
+    /// <summary>True, если при последней загрузке файл расписания был, но не читался/был повреждён,
+    /// и пришлось откатиться к блокировке всего. Цикл контроля сообщает об этом родителю.</summary>
     public bool ScheduleFileCorrupt { get; private set; }
 
-    /// <summary>A defensive copy of the current schedule (safe to read/enumerate freely).</summary>
+    /// <summary>Защитная копия текущего расписания (её можно свободно читать и перебирать).</summary>
     public Schedule Get()
     {
         lock (_gate)
@@ -38,10 +38,10 @@ public sealed class ScheduleStore
         }
     }
 
-    /// <summary>Back-compat alias used by the command handler.</summary>
+    /// <summary>Псевдоним для обратной совместимости, используется обработчиком команд.</summary>
     public Schedule Load() => Get();
 
-    /// <summary>Mutate the authoritative schedule under lock and persist atomically.</summary>
+    /// <summary>Изменить эталонное расписание под блокировкой и атомарно сохранить.</summary>
     public Schedule Update(Action<Schedule> mutate)
     {
         lock (_gate)
@@ -63,10 +63,10 @@ public sealed class ScheduleStore
     }
 
     /// <summary>
-    /// Compare the on-disk file against what we last wrote. If it differs (external edit or
-    /// deletion), restore our authoritative copy and return true so the caller can alert.
-    /// Legitimate edits (Telegram commands) go through <see cref="Update"/>/<see cref="Save"/>
-    /// and update the baseline, so they never register as tampering.
+    /// Сравнить файл на диске с тем, что мы записали последним. Если отличается (правка извне
+    /// или удаление), восстановить эталонную копию и вернуть true, чтобы вызывающий поднял алерт.
+    /// Законные правки (команды Telegram) идут через <see cref="Update"/>/<see cref="Save"/>
+    /// и обновляют точку отсчёта, поэтому никогда не считаются подменой.
     /// </summary>
     public bool SyncAndDetectTamper()
     {
@@ -82,16 +82,16 @@ public sealed class ScheduleStore
             }
             catch
             {
-                return false; // transient read error — don't cry wolf
+                return false; // временная ошибка чтения — не поднимаем ложную тревогу
             }
 
             if (diskHash == _lastHash)
                 return false;
 
-            // Revert to the authoritative copy. If the write fails (file locked, read-only, or a
-            // directory put in its place), enforcement must NOT be affected: the loop evaluates the
-            // in-memory authoritative schedule, not the on-disk file, so a failed revert can't disable
-            // blocking. We only need to avoid throwing (which would abort the tick) and avoid alert spam.
+            // Откатываем к эталонной копии. Если запись не удалась (файл заблокирован, только для чтения
+            // или на его месте каталог), контроль это затрагивать НЕ должно: цикл оценивает эталонное
+            // расписание в памяти, а не файл на диске, так что неудачный откат не может отключить
+            // блокировку. Нужно лишь не бросать исключение (оно прервало бы такт) и не спамить алертами.
             try
             {
                 WriteToDisk(_current!);
@@ -101,7 +101,7 @@ public sealed class ScheduleStore
             catch
             {
                 if (diskHash == _lastAlertedTamperHash)
-                    return false; // already alerted for this exact tampered content
+                    return false; // об этом самом подменённом содержимом уже предупреждали
                 _lastAlertedTamperHash = diskHash;
                 return true;
             }
@@ -120,23 +120,23 @@ public sealed class ScheduleStore
                 var s = JsonSerializer.Deserialize<Schedule>(json, JsonOpts);
                 if (s is not null)
                 {
-                    // Explicit nulls in the JSON ("Allowed": null) would otherwise crash evaluation.
+                    // Явные null в JSON ("Allowed": null) иначе обрушили бы оценку расписания.
                     s.Allowed ??= new();
                     s.Extras ??= new();
                     _current = s;
-                    _lastHash = Hash(json); // baseline = actual disk content
+                    _lastHash = Hash(json); // точка отсчёта = фактическое содержимое на диске
                     ScheduleFileCorrupt = false;
                     return;
                 }
             }
             catch
             {
-                // fall through to the fail-safe below
+                // проваливаемся в безопасный вариант ниже
             }
 
-            // The file exists but is unreadable/corrupt. Fail safe to BLOCKING EVERYTHING — never the
-            // permissive default, which would silently relax enforcement — and do NOT overwrite the
-            // file: the real schedule may be recoverable, and overwriting would destroy it.
+            // Файл есть, но не читается/повреждён. Безопасный вариант — БЛОКИРОВАТЬ ВСЁ, а не разрешающее
+            // расписание по умолчанию, которое тихо ослабило бы контроль, — и файл НЕ перезаписываем:
+            // настоящее расписание, возможно, удастся восстановить, а перезапись его уничтожит.
             _current = BlockedAll();
             ScheduleFileCorrupt = true;
             try { _lastHash = File.Exists(AppPaths.ScheduleFile) ? Hash(File.ReadAllText(AppPaths.ScheduleFile)) : ""; }
@@ -144,14 +144,14 @@ public sealed class ScheduleStore
             return;
         }
 
-        // First run, no file yet: start from the sensible default and persist it.
+        // Первый запуск, файла ещё нет: начинаем с разумного расписания по умолчанию и сохраняем его.
         _current = Schedule.Default();
         ScheduleFileCorrupt = false;
         WriteToDisk(_current);
     }
 
-    /// <summary>A schedule that blocks the whole day (Enabled, no allowed intervals) — the fail-safe
-    /// used when the on-disk schedule can't be read, so a corrupt file never relaxes enforcement.</summary>
+    /// <summary>Расписание, блокирующее весь день (Enabled, без разрешённых интервалов), — безопасный
+    /// вариант на случай, когда расписание на диске не читается, чтобы повреждённый файл никогда не ослаблял контроль.</summary>
     private static Schedule BlockedAll() => new() { Enabled = true };
 
     private void WriteToDisk(Schedule s)

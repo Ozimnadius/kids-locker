@@ -1,11 +1,11 @@
 namespace KidsLocker.Service.Scheduling;
 
-/// <summary>Result of evaluating the schedule at a moment in time.</summary>
+/// <summary>Результат оценки расписания на заданный момент времени.</summary>
 public readonly record struct Evaluation(bool Blocked, string Reason);
 
 /// <summary>
-/// Pure decision logic: given a <see cref="Schedule"/> and a local time, decide whether
-/// the PC should currently be blocked (bedtime). No I/O, no Windows calls — unit-testable.
+/// Чистая логика решения: по <see cref="Schedule"/> и локальному времени решает, должен ли
+/// ПК сейчас быть заблокирован (время сна). Без ввода-вывода и вызовов Windows — покрывается модульными тестами.
 /// </summary>
 public static class ScheduleEvaluator
 {
@@ -26,12 +26,12 @@ public static class ScheduleEvaluator
         return new Evaluation(true, "outside allowed time");
     }
 
-    /// <summary>Convenience wrapper.</summary>
+    /// <summary>Удобная обёртка.</summary>
     public static bool IsBlocked(Schedule s, DateTime nowLocal) => Evaluate(s, nowLocal).Blocked;
 
     /// <summary>
-    /// All allowed intervals in effect for the given local date: the weekday's base
-    /// intervals plus any dated extras. Malformed entries are skipped, never crash.
+    /// Все разрешённые интервалы, действующие в заданную локальную дату: базовые интервалы дня
+    /// недели плюс дополнительные на эту дату. Некорректные записи пропускаются и никогда не приводят к падению.
     /// </summary>
     public static IEnumerable<(TimeSpan From, TimeSpan To)> AllowedFor(Schedule s, DateTime localDate)
     {
@@ -58,23 +58,23 @@ public static class ScheduleEvaluator
         range = default;
         if (!TimeParsing.TryParse(from, out var f) || !TimeParsing.TryParse(to, out var t))
             return false;
-        if (t <= f) return false; // ignore zero/negative/inverted intervals
+        if (t <= f) return false; // пропускаем нулевые, отрицательные и перевёрнутые интервалы
         range = (f, t);
         return true;
     }
 
     /// <summary>
-    /// The next local time at which the blocked/allowed state flips, searching forward
-    /// from <paramref name="nowLocal"/> up to <paramref name="horizonDays"/> ahead.
-    /// Returns null if no change is found within the horizon (e.g. always-allowed).
-    /// Used to schedule an exact enforcement wake-up instead of relying only on polling.
+    /// Ближайшее локальное время, когда состояние «запрещено/разрешено» сменится; поиск идёт вперёд
+    /// от <paramref name="nowLocal"/> не дальше чем на <paramref name="horizonDays"/> дней.
+    /// Возвращает null, если в пределах горизонта смены нет (например, всегда разрешено).
+    /// Нужно, чтобы запланировать точное пробуждение контроля, а не полагаться только на опрос.
     /// </summary>
     public static DateTime? NextChange(Schedule s, DateTime nowLocal, int horizonDays = 8)
     {
         var current = Evaluate(s, nowLocal).Blocked;
 
-        // Candidate instants: every interval edge for each day in the horizon, plus the
-        // pause boundary. We step to the first candidate whose state differs from now.
+        // Моменты-кандидаты: каждая граница интервала для каждого дня в пределах горизонта плюс
+        // граница паузы. Берём первый кандидат, состояние в котором отличается от текущего.
         var candidates = new SortedSet<DateTime>();
 
         if (s.PauseUntil is DateTime until && until > nowLocal)
@@ -86,9 +86,9 @@ public static class ScheduleEvaluator
             foreach (var (from, to) in AllowedFor(s, day))
             {
                 Add(candidates, day + from, nowLocal);
-                // `to` is the first blocked instant of the interval. For a 24:00 end that instant is
-                // the next day's 00:00 — the real allowed→blocked flip. Clamping it back to 23:59:59.9
-                // (still allowed) made NextChange miss the midnight boundary entirely.
+                // `to` — первый запрещённый момент после интервала. Для конца 24:00 это 00:00 следующего
+                // дня — настоящая смена «разрешено→запрещено». Если обрезать его до 23:59:59.9 (ещё
+                // разрешено), NextChange совсем пропускал бы границу полуночи.
                 Add(candidates, day + to, nowLocal);
             }
         }
@@ -106,11 +106,11 @@ public static class ScheduleEvaluator
     }
 
     /// <summary>
-    /// Compute a one-off extra allowed interval of <paramref name="minutes"/> for today: it starts
-    /// at the later of "now" and the end of today's last allowed block, and is clamped to the end of
-    /// the day. Returns null when nothing can be added (non-positive minutes, or today is already
-    /// allowed right up to midnight) so callers can tell the user truthfully instead of silently
-    /// recording an empty 24:00–24:00 interval. Shared by the Telegram <c>/extra</c> and the GUI button.
+    /// Вычислить разовый дополнительный разрешённый интервал на <paramref name="minutes"/> минут на
+    /// сегодня: он начинается с более позднего из «сейчас» и конца последнего разрешённого блока за
+    /// сегодня и обрезается концом дня. Возвращает null, когда добавить нечего (число минут не больше
+    /// нуля или сегодня уже разрешено до самой полуночи), чтобы вызывающий честно сказал об этом
+    /// пользователю, а не записал молча пустой интервал 24:00–24:00. Общий для <c>/extra</c> в Telegram и кнопки в пульте.
     /// </summary>
     public static DatedInterval? BuildExtra(Schedule s, DateTime now, int minutes)
     {
@@ -118,7 +118,7 @@ public static class ScheduleEvaluator
 
         var latestTo = AllowedFor(s, now).Select(r => r.To).DefaultIfEmpty(now.TimeOfDay).Max();
         var start = now.TimeOfDay > latestTo ? now.TimeOfDay : latestTo;
-        if (start >= TimeParsing.EndOfDay) return null; // already allowed to the end of the day
+        if (start >= TimeParsing.EndOfDay) return null; // уже разрешено до конца дня
 
         var end = start + TimeSpan.FromMinutes(minutes);
         if (end > TimeParsing.EndOfDay) end = TimeParsing.EndOfDay;

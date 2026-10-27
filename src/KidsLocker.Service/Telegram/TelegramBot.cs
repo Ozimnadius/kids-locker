@@ -6,9 +6,9 @@ using Microsoft.Extensions.Logging;
 namespace KidsLocker.Service.Telegram;
 
 /// <summary>
-/// Long-polls Telegram for the parent's commands and dispatches them to
-/// <see cref="CommandHandler"/>. Only messages from the configured parent chat id are
-/// obeyed; anything else is ignored. Registered only when a token+chat id are configured.
+/// Долгим опросом получает из Telegram команды родителя и передаёт их в
+/// <see cref="CommandHandler"/>. Выполняются только сообщения из настроенного чата родителя;
+/// всё остальное игнорируется. Регистрируется, только если настроены токен и id чата.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class TelegramBot : BackgroundService
@@ -31,8 +31,8 @@ public sealed class TelegramBot : BackgroundService
         _log.LogInformation("Telegram bot started; parent chat id {ChatId}", _config.ParentChatId);
         await _client.SendMessageAsync(_config.ParentChatId, "✅ KidsLocker запущен. /help — команды.", stoppingToken);
 
-        // A real long poll must sit on the server a while; a 0/short timeout against a failing
-        // endpoint is what turns the loop hot, so hold it at a sane minimum.
+        // Настоящий долгий опрос должен какое-то время висеть на сервере; нулевой или короткий таймаут
+        // при сбоящем адресе и превращает цикл в холостую молотилку, поэтому держим разумный минимум.
         var pollSeconds = Math.Clamp(_config.TelegramLongPollSeconds, 20, 90);
         var startedUtc = DateTimeOffset.UtcNow;
         long offset = LoadOffset();
@@ -45,9 +45,10 @@ public sealed class TelegramBot : BackgroundService
                 var poll = await _client.PollUpdatesAsync(offset, pollSeconds, stoppingToken);
                 if (poll.Failed)
                 {
-                    // Network down, bad/revoked token (401), a second poller or a webhook (409), rate
-                    // limit (429)… Back off exponentially (2→4→…→60s) instead of spinning the CPU and
-                    // flooding the API. The long poll paces the success path, so no delay is needed there.
+                    // Нет сети, неверный или отозванный токен (401), второй опрашивающий или вебхук (409),
+                    // ограничение частоты (429)… Отступаем экспоненциально (2→4→…→60 с), а не крутим
+                    // процессор и не заваливаем API запросами. Успешный путь сам темпирован долгим опросом,
+                    // так что там задержка не нужна.
                     failures++;
                     var backoff = TimeSpan.FromSeconds(Math.Min(60, 1 << Math.Min(failures, 6)));
                     if (failures == 1 || failures % 10 == 0)
@@ -61,9 +62,9 @@ public sealed class TelegramBot : BackgroundService
                 foreach (var u in poll.Updates)
                 {
                     offset = Math.Max(offset, u.UpdateId + 1);
-                    SaveOffset(offset); // persist BEFORE acting, so a restart (or a /shutdown that kills us) can't replay it
+                    SaveOffset(offset); // сохраняем ДО выполнения, чтобы перезапуск (или убивший нас /shutdown) не выполнил команду повторно
                     if (IsStale(u.Message, startedUtc))
-                        continue; // a command that piled up while the PC was off — don't act on it now
+                        continue; // команда накопилась, пока ПК был выключен, — сейчас её не выполняем
                     await Dispatch(u, stoppingToken);
                 }
             }
@@ -114,7 +115,7 @@ public sealed class TelegramBot : BackgroundService
                 && long.TryParse(File.ReadAllText(AppPaths.TelegramOffsetFile).Trim(), out var v) && v > 0)
                 return v;
         }
-        catch { /* best effort — fall back to 0 */ }
+        catch { /* по возможности — откатываемся к 0 */ }
         return 0;
     }
 
@@ -125,11 +126,11 @@ public sealed class TelegramBot : BackgroundService
             AppPaths.EnsureRoot();
             File.WriteAllText(AppPaths.TelegramOffsetFile, offset.ToString());
         }
-        catch { /* best effort */ }
+        catch { /* по возможности */ }
     }
 
-    /// <summary>A message sent well before the bot started (PC was off/offline) must not be acted on
-    /// now — e.g. a bedtime /shutdown should not power the machine off the next morning.</summary>
+    /// <summary>Сообщение, отправленное задолго до запуска бота (ПК был выключен или без сети), сейчас
+    /// выполнять нельзя — например, вечерний /shutdown не должен выключить машину на следующее утро.</summary>
     private static bool IsStale(TgMessage? msg, DateTimeOffset startedUtc)
     {
         if (msg is null || msg.Date <= 0) return false;

@@ -4,26 +4,26 @@ using KidsLocker.Service.Notifications;
 namespace KidsLocker.Service.Config;
 
 /// <summary>
-/// Runtime configuration with secrets (Telegram token, parent chat id).
-/// Stored in config.local.json — never committed to source control.
+/// Рабочая конфигурация с секретами (токен Telegram, id чата родителя).
+/// Хранится в config.local.json — никогда не попадает в систему контроля версий.
 /// </summary>
 public sealed class AppConfig
 {
     public string BotToken { get; set; } = "";
 
-    /// <summary>The parent's Telegram chat id. Only messages from this id are obeyed.</summary>
+    /// <summary>Id чата родителя в Telegram. Выполняются только сообщения с этого id.</summary>
     public long ParentChatId { get; set; }
 
-    /// <summary>How often (seconds) the enforcement loop re-evaluates the schedule.</summary>
+    /// <summary>Как часто (в секундах) цикл контроля заново оценивает расписание.</summary>
     public int PollSeconds { get; set; } = 10;
 
-    /// <summary>Telegram long-poll timeout in seconds.</summary>
+    /// <summary>Таймаут долгого опроса Telegram в секундах.</summary>
     public int TelegramLongPollSeconds { get; set; } = 30;
 
-    /// <summary>PBKDF2 hash of the parent's master password that gates the admin GUI (base64).</summary>
+    /// <summary>Хэш PBKDF2 мастер-пароля родителя, закрывающего вход в административный пульт (base64).</summary>
     public string? MasterPasswordHash { get; set; }
 
-    /// <summary>Salt for <see cref="MasterPasswordHash"/> (base64).</summary>
+    /// <summary>Соль для <see cref="MasterPasswordHash"/> (base64).</summary>
     public string? MasterPasswordSalt { get; set; }
 
     public bool IsTelegramConfigured =>
@@ -45,10 +45,11 @@ public sealed class AppConfig
     }
 
     /// <summary>
-    /// Load the config. Returns true on a clean load or a genuine first run (no file); returns FALSE
-    /// when the file exists but can't be read or parsed — a caller that is about to save (the GUI)
-    /// must not overwrite in that case, or it would wipe the master-password hash and token. On
-    /// failure <paramref name="config"/> is a fresh default and the problem is written to the event log.
+    /// Загрузить конфиг. Возвращает true при чистой загрузке или при настоящем первом запуске (файла нет);
+    /// возвращает FALSE, когда файл есть, но не читается или не разбирается, — вызывающий, который
+    /// собирается сохранять (пульт), в этом случае не должен перезаписывать файл, иначе сотрёт хэш
+    /// мастер-пароля и токен. При неудаче <paramref name="config"/> — новый конфиг по умолчанию, а
+    /// проблема записывается в журнал событий.
     /// </summary>
     public static bool TryLoad(out AppConfig config, out string? error)
     {
@@ -81,10 +82,10 @@ public sealed class AppConfig
     {
         AppPaths.EnsureRoot();
 
-        // Never lose secrets already on disk just because this instance was built from a failed/empty
-        // Load: keep the stored master-password hash and token when we aren't setting them ourselves.
-        // (The GUI "save Telegram" path carries no password, so without this a save started after an
-        // unreadable Load would erase it.)
+        // Никогда не теряем секреты, уже лежащие на диске, только потому, что этот экземпляр собран после
+        // неудачного или пустого Load: сохраняем записанные хэш мастер-пароля и токен, если сами их не задаём.
+        // (Путь «сохранить Telegram» в пульте пароля не несёт, поэтому без этого сохранение после
+        // нечитаемого Load стёрло бы его.)
         try
         {
             if (File.Exists(AppPaths.ConfigFile))
@@ -99,9 +100,9 @@ public sealed class AppConfig
                 }
             }
         }
-        catch { /* can't read existing — just write what we have */ }
+        catch { /* существующий не читается — просто пишем то, что есть */ }
 
-        // Atomic write: a crash or power loss mid-write must not leave a truncated, unparseable config.
+        // Атомарная запись: падение или пропадание питания посреди записи не должны оставить обрезанный, неразбираемый конфиг.
         var json = JsonSerializer.Serialize(this, JsonOpts);
         var tmp = AppPaths.ConfigFile + ".tmp";
         File.WriteAllText(tmp, json);

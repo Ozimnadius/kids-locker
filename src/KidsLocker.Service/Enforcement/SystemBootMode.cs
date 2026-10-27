@@ -3,7 +3,7 @@ using System.Runtime.Versioning;
 
 namespace KidsLocker.Service.Enforcement;
 
-/// <summary>Detects whether Windows was booted into Safe Mode (GetSystemMetrics SM_CLEANBOOT).</summary>
+/// <summary>Определяет, загружена ли Windows в безопасном режиме (GetSystemMetrics SM_CLEANBOOT).</summary>
 [SupportedOSPlatform("windows")]
 public static class SystemBootMode
 {
@@ -15,7 +15,7 @@ public static class SystemBootMode
 
     public static bool IsSafeMode => GetSystemMetrics(SM_CLEANBOOT) != 0;
 
-    /// <summary>True while Windows itself is shutting down (incl. our own bedtime shutdown).</summary>
+    /// <summary>True, пока сама Windows завершает работу (в том числе при нашем собственном выключении по расписанию).</summary>
     public static bool IsSystemShuttingDown => GetSystemMetrics(SM_SHUTTINGDOWN) != 0;
 
     public static string Describe => GetSystemMetrics(SM_CLEANBOOT) switch

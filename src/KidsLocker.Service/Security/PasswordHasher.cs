@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 
 namespace KidsLocker.Service.Security;
 
-/// <summary>PBKDF2 (SHA-256) hashing for the admin GUI's master password.</summary>
+/// <summary>Хэширование PBKDF2 (SHA-256) для мастер-пароля административного пульта.</summary>
 public static class PasswordHasher
 {
     private const int SaltSize = 16;

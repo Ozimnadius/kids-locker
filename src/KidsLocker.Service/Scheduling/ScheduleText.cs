@@ -1,6 +1,6 @@
 namespace KidsLocker.Service.Scheduling;
 
-/// <summary>Parse/format a day's allowed intervals as text ("07:00-23:00, 14:00-18:00").</summary>
+/// <summary>Разбор и форматирование разрешённых интервалов дня в виде текста ("07:00-23:00, 14:00-18:00").</summary>
 public static class ScheduleText
 {
     public static List<Interval> ParseIntervals(string token)
