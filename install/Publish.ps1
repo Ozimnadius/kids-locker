@@ -1,8 +1,10 @@
-<#
+﻿<#
 .SYNOPSIS
-  Build KidsLocker as a single self-contained .exe (no .NET runtime needed on the target PC).
+  Собрать KidsLocker в один самодостаточный exe (на целевом ПК .NET не нужен).
 .DESCRIPTION
-  Output: publish\KidsLockerSvc.exe. Copy that one file to the son's PC and run Install.ps1 there.
+  Результат: publish\KidsLocker.exe. Скопировать этот файл на ПК сына и запустить:
+  откроется пульт, служба ставится в нём на вкладке «Служба».
+  Релизы с готовым exe собирает GitHub Actions по тегу vX.Y.Z (.github/workflows/release.yml).
 #>
 [CmdletBinding()]
 param(
