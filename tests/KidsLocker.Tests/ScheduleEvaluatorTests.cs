@@ -116,4 +116,38 @@ public class ScheduleEvaluatorTests
         Assert.True(ScheduleEvaluator.IsBlocked(s, Mon.AddHours(12)));
         Assert.Empty(ScheduleEvaluator.AllowedFor(s, Mon));
     }
+
+    [Fact]
+    public void NextChange_IntervalEndingAtMidnight_FindsMidnightBoundary()
+    {
+        // Allowed Sat 09:00–24:00, nothing on Sunday ⇒ the next flip is Sun 00:00 (blocked),
+        // not some later edge. The old clamp to 23:59:59.9 made this boundary disappear.
+        var s = OneDay("sat", ("09:00", "24:00"));
+        var next = ScheduleEvaluator.NextChange(s, Sat.AddHours(20));
+        Assert.Equal(Sat.AddDays(1), next); // Sunday 00:00
+    }
+
+    [Fact]
+    public void BuildExtra_DayAllowedToMidnight_ReturnsNull()
+    {
+        var s = OneDay("mon", ("07:00", "24:00"));
+        Assert.Null(ScheduleEvaluator.BuildExtra(s, Mon.AddHours(22), 60));
+    }
+
+    [Fact]
+    public void BuildExtra_ExtendsFromLastAllowed_ClampedToMidnight()
+    {
+        var s = OneDay("mon", ("07:00", "23:00"));
+        var extra = ScheduleEvaluator.BuildExtra(s, Mon.AddHours(22), 60);
+        Assert.NotNull(extra);
+        Assert.Equal("23:00", extra!.From);
+        Assert.Equal("24:00", extra.To);
+    }
+
+    [Fact]
+    public void BuildExtra_NonPositiveMinutes_ReturnsNull()
+    {
+        var s = OneDay("mon", ("07:00", "23:00"));
+        Assert.Null(ScheduleEvaluator.BuildExtra(s, Mon.AddHours(10), 0));
+    }
 }
