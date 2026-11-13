@@ -270,7 +270,8 @@ public static class Installer
         sb.Append("<AllowHardTerminate>true</AllowHardTerminate>");
         sb.Append("<StartWhenAvailable>true</StartWhenAvailable>");
         sb.Append("<Enabled>true</Enabled>");
-        sb.Append("<ExecutionTimeLimit>PT5M</ExecutionTimeLimit>");
+        // Пять минут на проверку времени плюс запас на IPC, уведомление и выключение.
+        sb.Append("<ExecutionTimeLimit>PT6M</ExecutionTimeLimit>");
         sb.Append("</Settings>");
         sb.Append("<Actions Context=\"Author\">");
         sb.Append($"<Exec><Command>{Xml(command)}</Command><Arguments>{Xml(arguments)}</Arguments></Exec>");

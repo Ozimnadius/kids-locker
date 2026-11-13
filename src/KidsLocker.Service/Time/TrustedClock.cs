@@ -58,15 +58,17 @@ public sealed class TrustedClock(IInternetTimeSource source, TimeProvider? timer
 
     public async Task InitializeAsync(CancellationToken ct)
     {
-        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        budget.CancelAfter(TimeSpan.FromSeconds(20));
+        // Ожидание нужно только до первого подтверждения времени. Успешный ответ
+        // сразу возвращает управление проверке расписания, без остатка льготных минут.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(5), _timer);
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
         try
         {
             while (UtcNow is null)
             {
                 await RefreshAsync(budget.Token);
                 if (UtcNow is not null) break;
-                await Task.Delay(TimeSpan.FromSeconds(2), budget.Token);
+                await Task.Delay(TimeSpan.FromSeconds(2), _timer, budget.Token);
             }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }

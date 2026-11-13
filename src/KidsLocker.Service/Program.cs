@@ -146,12 +146,11 @@ internal static class Program
         using var lf = LoggerFactory.Create(b => b.AddSimpleConsole(o => o.TimestampFormat = "HH:mm:ss "));
         var (notifier, http) = BuildNotifier(cfg, lf);
 
-        var store = new ScheduleStore();
         var enforcer = new Enforcer(lf.CreateLogger<Enforcer>(), live);
 
-        var schedule = store.Load();
-        var utc = schedule.Enabled ? await TrustedTimeReader.GetUtcAsync(startup: true) : null;
-        var eval = TrustedSchedule.Evaluate(schedule, utc);
+        var eval = await TrustedSchedule.EvaluateCurrentAsync(
+            () => new ScheduleStore().Load(),
+            () => TrustedTimeReader.GetUtcAsync(startup: true));
         lf.CreateLogger("enforce-once").LogInformation("Решение: {Decision}. {Reason}. Режим: {Mode}",
             eval.Blocked ? "запрет" : "разрешение", eval.Reason, live ? "боевой" : "тестовый");
 
