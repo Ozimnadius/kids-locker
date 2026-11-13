@@ -10,6 +10,17 @@ namespace KidsLocker.Tests;
 [Collection("EnvHome")]
 public class ScheduleStoreTamperTests : IDisposable
 {
+    [Fact]
+    public void LegacyPauseWithOffset_IsConvertedToMoscow()
+    {
+        Directory.CreateDirectory(KidsLocker.Service.Config.AppPaths.RootDir);
+        // UTC+14 в старом JSON не должен интерпретироваться через текущий пояс Windows.
+        File.WriteAllText(KidsLocker.Service.Config.AppPaths.ScheduleFile,
+            "{\"LastTimeZoneId\":\"UTC\",\"PauseUntil\":\"2026-11-14T22:00:00+14:00\"}");
+        var schedule = new ScheduleStore().Get();
+        Assert.Equal(new DateTime(2026, 11, 14, 11, 0, 0), schedule.PauseUntil);
+        Assert.Equal(DateTimeKind.Unspecified, schedule.PauseUntil!.Value.Kind);
+    }
     private readonly string _home;
 
     public ScheduleStoreTamperTests()

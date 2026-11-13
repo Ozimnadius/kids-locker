@@ -22,7 +22,7 @@ public sealed class CommandHandler
     {
         _store = store;
         _enforcer = enforcer;
-        _now = nowProvider ?? (() => DateTime.Now);
+        _now = nowProvider ?? (() => throw new InvalidOperationException("Время ещё не подтверждено через интернет."));
     }
 
     public string Handle(string rawText)

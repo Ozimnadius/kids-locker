@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
-using Microsoft.Win32;
 using KidsLocker.Service.Config;
 using KidsLocker.Service.Enforcement;
 using KidsLocker.Service.Notifications;
 using KidsLocker.Service.Scheduling;
 using KidsLocker.Service.Setup;
+using KidsLocker.Service.Time;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Logging;
@@ -29,8 +29,11 @@ public sealed class EnforcementWorker : BackgroundService
     private bool? _wasBlocked;
     private DateTime _lastWallUtc;
     private long _lastStamp;
-    private DateTime _lastHardenUtc = DateTime.UtcNow;
-    private volatile bool _resumedSinceLastTick;
+    private long _lastHardenStamp = Stopwatch.GetTimestamp();
+    private readonly TrustedClock _clock;
+    private Task? _refreshTask;
+    private Task? _hardeningTask;
+    private string? _observedZone;
     private bool _corruptAlerted;
 
     public EnforcementWorker(
@@ -38,36 +41,39 @@ public sealed class EnforcementWorker : BackgroundService
         ScheduleStore store,
         Enforcer enforcer,
         Notifier notifier,
-        AppConfig config)
+        AppConfig config,
+        TrustedClock clock)
     {
         _log = log;
         _store = store;
         _enforcer = enforcer;
         _notifier = notifier;
         _config = config;
+        _clock = clock;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _notifier.Info($"KidsLocker enforcement started. Mode={(_enforcer.IsLive ? "LIVE" : "DRY-RUN")}, poll={_config.PollSeconds}s");
+        _notifier.Info($"Контроль KidsLocker запущен. Режим: {(_enforcer.IsLive ? "боевой" : "тестовый")}, интервал: {_config.PollSeconds} с.");
 
         if (SystemBootMode.IsSafeMode)
-            _notifier.Alert($"Внимание: система загружена в БЕЗОПАСНОМ режиме ({SystemBootMode.Describe}). Контроль активен, выключение работает.");
+            _notifier.Alert($"Внимание: система загружена в БЕЗОПАСНОМ режиме ({SystemBootMode.Describe}). Проверяю время и расписание; при отсутствии доверенного времени работа запрещена.");
 
         _lastWallUtc = DateTime.UtcNow;
         _lastStamp = Stopwatch.GetTimestamp();
 
-        // При выходе из сна/гибернации системные часы прыгают вперёд, а монотонный таймер стоял на месте,
-        // и детектор скачков времени иначе принял бы это за «время изменили». Запоминаем пробуждение,
-        // чтобы пропустить следующую проверку. По возможности: если подписаться на событие питания
-        // здесь не удалось, поведение просто остаётся прежним (с тем же ложным алертом, что и раньше).
-        try { SystemEvents.PowerModeChanged += OnPowerModeChanged; } catch { /* нет цикла обработки сообщений */ }
+        await _clock.InitializeAsync(stoppingToken);
+        _notifier.Info(_clock.UtcNow is null
+            ? "Не удалось подтвердить время через оба источника. При включённом контроле работа запрещена."
+            : $"Время подтверждено: {_clock.UtcNow:O}");
 
         var period = TimeSpan.FromSeconds(Math.Clamp(_config.PollSeconds, 3, 120));
         try
         {
             while (!stoppingToken.IsCancellationRequested)
             {
+                if (_clock.RefreshDue && (_refreshTask is null || _refreshTask.IsCompleted))
+                    _refreshTask = RefreshClockAsync(stoppingToken);
                 try { await TickAsync(stoppingToken); }
                 catch (Exception ex) { _log.LogError(ex, "Enforcement tick failed"); }
 
@@ -77,16 +83,19 @@ public sealed class EnforcementWorker : BackgroundService
         }
         finally
         {
-            try { SystemEvents.PowerModeChanged -= OnPowerModeChanged; } catch { }
+            if (_refreshTask is not null)
+                try { await _refreshTask; } catch (OperationCanceledException) { }
         }
     }
 
-    private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
+    private async Task RefreshClockAsync(CancellationToken ct)
     {
-        if (e.Mode == PowerModes.Resume) _resumedSinceLastTick = true;
+        try { await _clock.RefreshAsync(ct); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception ex) { _notifier.Info("Не удалось обновить время: " + ex.Message); }
     }
 
-    private async Task TickAsync(CancellationToken ct)
+    internal async Task TickAsync(CancellationToken ct)
     {
         // Вспомогательные шаги обёрнуты каждый в свою защиту: сбой любого из них (например, файл
         // расписания сделали только для чтения и запись при откате подмены бросает исключение) НИКОГДА
@@ -119,35 +128,37 @@ public sealed class EnforcementWorker : BackgroundService
         }
 
         try { DetectClockJump(); } catch (Exception ex) { _log.LogError(ex, "Clock-jump check failed"); }
-        try { DetectTimeZoneChange(schedule); } catch (Exception ex) { _log.LogError(ex, "Time-zone check failed"); }
+        try { DetectTimeZoneChange(); } catch (Exception ex) { _log.LogError(ex, "Time-zone check failed"); }
 
-        var now = DateTime.Now;
-        var eval = ScheduleEvaluator.Evaluate(schedule, now);
+        var utc = _clock.UtcNow;
+        var eval = TrustedSchedule.Evaluate(schedule, utc);
 
         if (eval.Blocked)
         {
-            if (_wasBlocked != true)
+            try
             {
-                var who = SessionQuery.ActiveConsoleUser();
-                var whoTxt = who is null ? "" : $" (сеанс: {who})";
-                // Доставляем алерт ДО того, как принудительное выключение оборвёт сеть, — но ограничиваем
-                // ожидание, чтобы недоступный Telegram не откладывал выключение. AlertAsync сначала
-                // синхронно пишет в локальный лог и журнал событий, так что эта запись сохранится в любом случае.
-                using var alertCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                alertCts.CancelAfter(TimeSpan.FromSeconds(10));
-                try { await _notifier.AlertAsync($"Запрещённое время{whoTxt}. Выключаю компьютер. [{now:HH:mm}]", alertCts.Token); }
-                catch (Exception ex) { _log.LogError(ex, "Pre-shutdown alert failed"); }
+                if (_wasBlocked != true)
+                {
+                    using var alertCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    alertCts.CancelAfter(TimeSpan.FromSeconds(2));
+                    try
+                    {
+                        await _notifier.AlertAsync($"Работа запрещена: {eval.Reason}. Выключаю компьютер.", alertCts.Token);
+                    }
+                    catch (Exception ex) { _notifier.Info("Уведомление перед выключением не доставлено: " + ex.Message); }
+                }
             }
-            _enforcer.ShutdownNow(eval.Reason);
+            finally { _enforcer.ShutdownNow(eval.Reason); }
         }
         else if (_wasBlocked == true)
         {
-            _notifier.Info($"Allowed time resumed at {now:HH:mm}.");
+            _notifier.Info("Снова наступило разрешённое время.");
         }
 
         _wasBlocked = eval.Blocked;
 
-        SelfHeal();
+        if (_hardeningTask is null || _hardeningTask.IsCompleted)
+            _hardeningTask = Task.Run(SelfHeal, ct);
     }
 
     /// <summary>
@@ -159,9 +170,9 @@ public sealed class EnforcementWorker : BackgroundService
     private void SelfHeal()
     {
         if (!WindowsServiceHelpers.IsWindowsService()) return; // при запуске разработчиком или в консоли задачи и реестр не трогаем
-        if (DateTime.UtcNow - _lastHardenUtc < TimeSpan.FromMinutes(5)) return;
+        if (Stopwatch.GetElapsedTime(_lastHardenStamp) < TimeSpan.FromMinutes(5)) return;
 
-        _lastHardenUtc = DateTime.UtcNow;
+        _lastHardenStamp = Stopwatch.GetTimestamp();
         try
         {
             var restored = Installer.EnsureHardening(dryRun: !_enforcer.IsLive);
@@ -184,34 +195,21 @@ public sealed class EnforcementWorker : BackgroundService
         var wall = nowUtc - _lastWallUtc;
         var drift = wall - monotonic;
 
-        // Только что вышли из сна/гибернации: разрыв — это реально прошедшее время, которое монотонный
-        // таймер (Stopwatch/QPC) не учёл, а не смена часов. Пропускаем это сравнение и берём новую точку отсчёта.
-        var justResumed = _resumedSinceLastTick;
-        _resumedSinceLastTick = false;
-
-        if (!justResumed && _wasBlocked.HasValue && Math.Abs(drift.TotalSeconds) > 120)
+        // QPC в Windows учитывает сон. Перевод часов влияет только на уведомление,
+        // а разрешение работы всегда вычисляется по доверенному UTC.
+        if (_wasBlocked.HasValue && Math.Abs(drift.TotalSeconds) > 120)
             _notifier.Alert($"Системное время изменено примерно на {drift.TotalMinutes:+0;-0} мин.");
 
         _lastWallUtc = nowUtc;
         _lastStamp = nowStamp;
     }
 
-    private void DetectTimeZoneChange(Schedule schedule)
+    private void DetectTimeZoneChange()
     {
-        // TimeZoneInfo.Local (и DateTime.Now, по которому работает контроль) кэшируются на всё время
-        // жизни процесса; без сброса этого кэша смена часового пояса не будет замечена — на неё не
-        // отреагирует ни этот алерт, ни оценка расписания.
         TimeZoneInfo.ClearCachedData();
-        var tz = TimeZoneInfo.Local.Id;
-        if (string.IsNullOrEmpty(schedule.LastTimeZoneId))
-        {
-            _store.Update(s => s.LastTimeZoneId = tz);
-            return;
-        }
-        if (!string.Equals(schedule.LastTimeZoneId, tz, StringComparison.Ordinal))
-        {
-            _notifier.Alert($"Часовой пояс изменён: {schedule.LastTimeZoneId} → {tz}.");
-            _store.Update(s => s.LastTimeZoneId = tz);
-        }
+        var zone = TimeZoneInfo.Local.Id;
+        if (_observedZone is not null && _observedZone != zone)
+            _notifier.Alert($"Часовой пояс Windows изменён: {_observedZone} → {zone}. Пояс расписания остаётся прежним.");
+        _observedZone = zone;
     }
 }

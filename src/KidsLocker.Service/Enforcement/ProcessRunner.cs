@@ -24,11 +24,22 @@ internal static class ProcessRunner
             };
             using var p = Process.Start(psi);
             if (p is null) return (-1, "");
-            // Читаем потоки ДО WaitForExit: иначе большой вывод может переполнить буфер и привести к взаимной блокировке.
-            var so = p.StandardOutput.ReadToEnd();
-            var se = p.StandardError.ReadToEnd();
-            p.WaitForExit(timeoutMs);
-            return (p.ExitCode, (so + se).Trim());
+            using var budget = new CancellationTokenSource(timeoutMs);
+            // Синхронный ReadToEnd до WaitForExit делал таймаут фиктивным: зависший процесс
+            // держал stdout открытым бесконечно. Ограничиваем и процесс, и чтение обоих потоков.
+            var so = p.StandardOutput.ReadToEndAsync(budget.Token);
+            var se = p.StandardError.ReadToEndAsync(budget.Token);
+            try
+            {
+                Task.WhenAll(p.WaitForExitAsync(budget.Token), so, se)
+                    .WaitAsync(budget.Token).GetAwaiter().GetResult();
+                return (p.ExitCode, (so.Result + se.Result).Trim());
+            }
+            catch (OperationCanceledException)
+            {
+                try { p.Kill(entireProcessTree: true); } catch { }
+                return (-1, $"Команда не завершилась за {timeoutMs} мс");
+            }
         }
         catch (Exception ex)
         {

@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using Microsoft.Extensions.Logging;
+using KidsLocker.Service.Notifications;
 
 namespace KidsLocker.Service.Enforcement;
 
@@ -13,11 +14,13 @@ public sealed class Enforcer
 {
     private readonly ILogger<Enforcer> _log;
     private readonly bool _live;
+    private readonly Action<string> _shutdown;
 
-    public Enforcer(ILogger<Enforcer> log, bool live)
+    public Enforcer(ILogger<Enforcer> log, bool live, Action<string>? shutdown = null)
     {
         _log = log;
         _live = live;
+        _shutdown = shutdown ?? NativeShutdown.Force;
     }
 
     public bool IsLive => _live;
@@ -27,11 +30,16 @@ public sealed class Enforcer
     {
         if (!_live)
         {
-            _log.LogWarning("[DRY-RUN] Would shut down now. Reason: {Reason}", reason);
+            _log.LogWarning("[ТЕСТ] Компьютер был бы выключен. Причина: {Reason}", reason);
             return;
         }
 
-        _log.LogWarning("Forcing shutdown. Reason: {Reason}", reason);
-        NativeShutdown.Force("KidsLocker: плановое выключение");
+        try { _log.LogWarning("Принудительное выключение. Причина: {Reason}", reason); } catch { }
+        try { _shutdown("KidsLocker: " + reason); }
+        catch (Exception ex)
+        {
+            OperationalLog.Write("Ошибка выключения: " + ex.Message);
+            throw;
+        }
     }
 }

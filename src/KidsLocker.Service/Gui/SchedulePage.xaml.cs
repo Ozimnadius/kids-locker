@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -6,6 +7,7 @@ using System.Windows.Media;
 using KidsLocker.Service.Config;
 using KidsLocker.Service.Enforcement;
 using KidsLocker.Service.Scheduling;
+using KidsLocker.Service.Time;
 
 namespace KidsLocker.Service.Gui;
 
@@ -30,6 +32,7 @@ public sealed partial class SchedulePage : UserControl, IPage
     private readonly IShell _shell;
     private readonly List<DayRow> _rows = new();
     private string[] _savedTexts = Array.Empty<string>();
+    private bool _refreshingStatus;
 
     public SchedulePage(IShell shell)
     {
@@ -132,7 +135,7 @@ public sealed partial class SchedulePage : UserControl, IPage
             return;
         }
 
-        // Сохраняем только дни: дополнительные отрезки, пауза, часовой пояс и «Контроль включён»
+        // Сохраняем дни: дополнительные отрезки, пауза и «Контроль включён»
         // остаются как в файле (тумблер применяется сам, а его могли переключить и из Telegram).
         var s = new ScheduleStore().Load();
         foreach (var row in _rows)
@@ -155,20 +158,37 @@ public sealed partial class SchedulePage : UserControl, IPage
     }
 
     private void OnPause(object sender, RoutedEventArgs e) =>
-        RunAction("Ставлю паузу на 2 часа…", st => st.Update(x => x.PauseUntil = DateTime.Now.AddHours(2)));
+        RunTimedAction("Ставлю паузу на 2 часа…", (st, now) => st.Update(x => x.PauseUntil = now.AddHours(2)));
 
     private void OnResume(object sender, RoutedEventArgs e) =>
         RunAction("Снимаю паузу…", st => st.Update(x => x.PauseUntil = null));
 
-    private void OnExtraHour(object sender, RoutedEventArgs e)
-    {
-        // Раньше в этом случае молча записывался пустой отрезок 24:00-24:00.
-        if (ReadScheduleQuietly() is { } s && ScheduleEvaluator.BuildExtra(s, DateTime.Now, 60) is null)
+    private void OnExtraHour(object sender, RoutedEventArgs e) =>
+        RunTimedAction("Добавляю час на сегодня…", (st, now) =>
         {
-            ActionInfo.Show(InfoSeverity.Info, "Сегодня и так разрешено до полуночи — добавлять нечего.");
-            return;
-        }
-        RunAction("Добавляю час на сегодня…", AddExtraHour);
+            var extra = ScheduleEvaluator.BuildExtra(st.Load(), now, 60);
+            if (extra is null) throw new InvalidOperationException("Сегодня уже разрешено до полуночи — добавлять нечего.");
+            st.Update(x => x.Extras.Add(extra));
+        });
+
+    private async void RunTimedAction(string text, Action<ScheduleStore, DateTime> op)
+    {
+        ActionInfo.Hide();
+        var error = await _shell.RunAsync(text, async () =>
+        {
+            // Получаем время ДО остановки службы для записи расписания.
+            var utc = await TrustedTimeReader.GetUtcAsync();
+            if (utc is null) throw new InvalidOperationException("Время ещё не подтверждено через интернет.");
+            var stamp = Stopwatch.GetTimestamp();
+            await Task.Run(() => ServiceControl.ApplyWithReload(() =>
+            {
+                var st = new ScheduleStore();
+                op(st, TrustedSchedule.LocalNow(st.Get(), utc + Stopwatch.GetElapsedTime(stamp)));
+            }));
+        }, critical: true);
+        if (error is not null) ActionInfo.Show(InfoSeverity.Error, "Ошибка: " + error.Message);
+        RefreshStatus();
+        _shell.RefreshServiceStatus();
     }
 
     private async void RunAction(string text, Action<ScheduleStore> op)
@@ -179,15 +199,6 @@ public sealed partial class SchedulePage : UserControl, IPage
         if (error is not null) ActionInfo.Show(InfoSeverity.Error, "Ошибка: " + error.Message);
         RefreshStatus();
         _shell.RefreshServiceStatus();
-    }
-
-    // Тот же общий расчёт, что у команды Telegram /extra: час с конца сегодняшнего разрешённого
-    // времени (или с «сейчас»), не дальше полуночи; null — добавлять нечего.
-    private static void AddExtraHour(ScheduleStore st)
-    {
-        var extra = ScheduleEvaluator.BuildExtra(st.Load(), DateTime.Now, 60);
-        if (extra is not null)
-            st.Update(x => x.Extras.Add(extra));
     }
 
     private async void OnShutdown(object sender, RoutedEventArgs e)
@@ -218,28 +229,41 @@ public sealed partial class SchedulePage : UserControl, IPage
     /// Обновить карточку «сейчас» и тумблер. Файл расписания здесь только читается: опрос раз в
     /// полминуты ничего не должен записывать, даже если файл как раз меняет служба.
     /// </summary>
-    public void RefreshStatus()
+    public async void RefreshStatus()
     {
-        if (ReadScheduleQuietly() is not { } s) return;
-
-        // Контроль могли переключить из Telegram (/on, /off), пока пульт открыт.
-        if (Enabled.IsEnabled) Enabled.IsChecked = s.Enabled;
-
-        var now = DateTime.Now;
-        var eval = ScheduleEvaluator.Evaluate(s, now);
-        var (text, back, fore) = !s.Enabled
-            ? ("Контроль выключен", "SystemFillColorCautionBackgroundBrush", "SystemFillColorCautionBrush")
-            : eval.Blocked
-                ? ("Сейчас запрещено", "SystemFillColorCriticalBackgroundBrush", "SystemFillColorCriticalBrush")
-                : ("Сейчас разрешено", "SystemFillColorSuccessBackgroundBrush", "SystemFillColorSuccessBrush");
-        NowText.Text = text;
-        NowBadge.SetResourceReference(Border.BackgroundProperty, back);
-        NowText.SetResourceReference(TextBlock.ForegroundProperty, fore);
-
-        var details = new List<string>();
-        if (s.PauseUntil is DateTime pause && pause > now) details.Add($"Пауза до {pause:HH:mm}");
-        if (ScheduleEvaluator.NextChange(s, now) is DateTime change) details.Add($"Смена в {change:ddd HH:mm}");
-        NowDetails.Text = string.Join(" · ", details);
+        if (_refreshingStatus) return;
+        _refreshingStatus = true;
+        try
+        {
+            var utc = await TrustedTimeReader.GetUtcAsync();
+            if (ReadScheduleQuietly() is not { } s) return;
+            if (Enabled.IsEnabled) Enabled.IsChecked = s.Enabled;
+            var eval = TrustedSchedule.Evaluate(s, utc);
+            var (text, back, fore) = !s.Enabled
+                ? ("Контроль выключен", "SystemFillColorCautionBackgroundBrush", "SystemFillColorCautionBrush")
+                : eval.Blocked
+                    ? ("Сейчас запрещено", "SystemFillColorCriticalBackgroundBrush", "SystemFillColorCriticalBrush")
+                    : ("Сейчас разрешено", "SystemFillColorSuccessBackgroundBrush", "SystemFillColorSuccessBrush");
+            NowText.Text = text;
+            NowBadge.SetResourceReference(Border.BackgroundProperty, back);
+            NowText.SetResourceReference(TextBlock.ForegroundProperty, fore);
+            if (utc is null)
+            {
+                NowDetails.Text = "Время не подтверждено через интернет";
+                return;
+            }
+            var now = TrustedSchedule.LocalNow(s, utc);
+            var details = new List<string> { $"Проверенное время: {now:HH:mm}", "Москва (UTC+3)" };
+            if (s.PauseUntil is DateTime pause && pause > now) details.Add($"Пауза до {pause:HH:mm}");
+            if (ScheduleEvaluator.NextChange(s, now) is DateTime change) details.Add($"Смена в {change:ddd HH:mm}");
+            NowDetails.Text = string.Join(" · ", details);
+        }
+        catch (Exception ex)
+        {
+            NowText.Text = "Статус не подтверждён";
+            NowDetails.Text = ex.Message;
+        }
+        finally { _refreshingStatus = false; }
     }
 
     // Читаем так, чтобы не мешать службе заменять файл (File.Move поверх открытого файла).

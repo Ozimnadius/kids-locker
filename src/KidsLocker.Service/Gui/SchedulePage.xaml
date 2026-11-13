@@ -27,6 +27,8 @@
             <Border Style="{StaticResource Card}">
                 <StackPanel>
                     <TextBlock Text="Разрешённое время" Style="{StaticResource CardTitle}" />
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,8"
+                               Text="Все часы указаны по Москве (UTC+3). Время проверяется через интернет." />
                     <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,12"
                                Text="Несколько отрезков — через запятую: 07:00-12:00, 14:00-23:00. 24:00 — полночь." />
 

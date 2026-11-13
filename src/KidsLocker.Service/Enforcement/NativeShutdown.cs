@@ -17,22 +17,17 @@ internal static class NativeShutdown
     /// «Выключить сейчас» в пульте, чтобы не дублировать вызов shutdown.exe в двух местах.</summary>
     public static void Force(string comment)
     {
-        try
-        {
-            // /s — выключение, /f — принудительно закрыть приложения, /t 0 — немедленно, /c — комментарий.
-            var psi = new ProcessStartInfo
-            {
-                FileName = "shutdown.exe",
-                Arguments = $"/s /f /t 0 /c \"{comment}\"",
-                CreateNoWindow = true,
-                UseShellExecute = false,
-            };
-            Process.Start(psi);
-        }
-        catch
-        {
-            TryForce();
-        }
+        // Полный путь исключает подмену shutdown.exe через рабочую папку или PATH.
+        var exe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "shutdown.exe");
+        var safeComment = comment.Replace('"', '\'');
+        Execute(() => ProcessRunner.Run(exe, $"/s /f /t 0 /c \"{safeComment}\"", 3000).code == 0, TryForce);
+    }
+
+    internal static void Execute(Func<bool> command, Func<bool> native)
+    {
+        try { if (command()) return; } catch { }
+        if (!native())
+            throw new InvalidOperationException("Windows не выполнила выключение ни через shutdown.exe, ни через системный API.");
     }
 
     public static bool TryForce()

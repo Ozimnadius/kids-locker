@@ -113,7 +113,7 @@ public sealed class TelegramClient
     /// в отличие от случая, когда обновлений просто нет. Цикл бота по <see cref="Failed"/> отступает,
     /// а не долбит API, когда токен неверный, работает второй опрашивающий (409) и т. п.
     /// </summary>
-    public readonly record struct UpdatesPoll(List<TgUpdate> Updates, bool Failed);
+    public readonly record struct UpdatesPoll(List<TgUpdate> Updates, bool Failed, DateTimeOffset? ServerUtc = null);
 
     /// <summary>
     /// Долгий опрос обновлений новее <paramref name="offset"/>. Отличает «обновлений нет» от
@@ -139,7 +139,7 @@ public sealed class TelegramClient
                 var u = item.Deserialize<TgUpdate>(JsonOpts);
                 if (u is not null) list.Add(u);
             }
-            return new(list, Failed: false);
+            return new(list, Failed: false, ServerUtc: resp.Headers.Date);
         }
         catch (OperationCanceledException)
         {
