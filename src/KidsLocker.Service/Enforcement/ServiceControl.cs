@@ -113,6 +113,8 @@ public static class ServiceControl
         RunSc($"description {ServiceName} \"KidsLocker parental time control\"");
         RunSc($"failure {ServiceName} reset= 86400 actions= restart/5000/restart/5000/restart/5000");
         RunSc($"failureflag {ServiceName} 1");
+        try { Setup.SafeBootRegistration.Register(); }
+        catch { return false; }
         var okStart = RunSc($"start {ServiceName}");
         return okCreate || okStart;
     }

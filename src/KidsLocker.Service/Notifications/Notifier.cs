@@ -22,7 +22,11 @@ public sealed class Notifier
         _telegram = telegram;
     }
 
-    public void Info(string message) => _log.LogInformation("{Message}", message);
+    public void Info(string message)
+    {
+        OperationalLog.Write(message);
+        try { _log.LogInformation("{Message}", message); } catch { }
+    }
 
     /// <summary>Алерт «отправил и забыл» для долгоживущего цикла (не блокирует цикл).</summary>
     public void Alert(string message)
@@ -45,7 +49,8 @@ public sealed class Notifier
 
     private void LogLocally(string message)
     {
-        _log.LogWarning("ALERT: {Message}", message);
+        OperationalLog.Write(message);
+        try { _log.LogWarning("Событие: {Message}", message); } catch { }
         WindowsEventLog.TryWrite(message);
     }
 

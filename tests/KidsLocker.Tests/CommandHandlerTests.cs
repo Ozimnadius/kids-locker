@@ -38,6 +38,17 @@ public class CommandHandlerTests : IDisposable
     private static readonly DateTime MonMorning = new(2024, 1, 1, 10, 0, 0);
 
     [Fact]
+    public void TimeCommands_WithoutVerifiedTime_DoNotWritePauseOrExtra()
+    {
+        var store = new ScheduleStore();
+        var handler = new CommandHandler(store, new Enforcer(NullLogger<Enforcer>.Instance, false));
+        Assert.Contains("Время", handler.Handle("/pause 2h"));
+        Assert.Contains("Время", handler.Handle("/extra 60"));
+        Assert.Null(store.Get().PauseUntil);
+        Assert.Empty(store.Get().Extras);
+    }
+
+    [Fact]
     public void Pause_1h30_Is90Minutes()
     {
         var store = new ScheduleStore();

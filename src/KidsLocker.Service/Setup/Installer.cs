@@ -128,14 +128,8 @@ public static class Installer
     /// </summary>
     private static void RegisterSafeBoot(Action<string> L)
     {
-        var ok = true;
-        foreach (var set in new[] { "Minimal", "Network" })
-        {
-            var (code, output) = RunProcess("reg.exe",
-                $"add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\{set}\\{ServiceName}\" /ve /t REG_SZ /d Service /f");
-            if (code != 0) { ok = false; L($"⚠ Safe Mode ({set}) не прописан (reg.exe, код {code}): {output}"); }
-        }
-        if (ok) L("Служба включена и в безопасном режиме (Safe Mode).");
+        SafeBootRegistration.Register();
+        L("Регистрация службы в обоих вариантах безопасного режима проверена.");
     }
 
     private static void UnregisterSafeBoot()
@@ -155,16 +149,17 @@ public static class Installer
     {
         var restored = new List<string>();
 
-        if (!TaskExists(GuardianTask) || !TaskExists(EnforceTask))
-        {
-            CreateTasks(dryRun, _ => { });
-            restored.Add("задачи планировщика");
-        }
-
+        // SafeBoot проверяем первым: планировщик может быть недоступен в безопасном режиме.
         if (!SafeBootExists("Minimal") || !SafeBootExists("Network"))
         {
             RegisterSafeBoot(_ => { });
-            restored.Add("режим Safe Mode");
+            restored.Add("безопасный режим");
+        }
+
+        if (!SystemBootMode.IsSafeMode && (!TaskExists(GuardianTask) || !TaskExists(EnforceTask)))
+        {
+            CreateTasks(dryRun, _ => { });
+            restored.Add("задачи планировщика");
         }
 
         return string.Join(", ", restored);
@@ -174,7 +169,7 @@ public static class Installer
         RunProcess("schtasks.exe", $"/query /tn \"{name}\"").code == 0;
 
     private static bool SafeBootExists(string set) =>
-        RunProcess("reg.exe", $"query \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\{set}\\{ServiceName}\"").code == 0;
+        string.Equals(SafeBootRegistration.Read(set), "Service", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Остановить и удалить службу, дождавшись, пока SCM её отпустит, а процесс завершится.</summary>
     private static void StopAndDeleteService(Action<string> L)

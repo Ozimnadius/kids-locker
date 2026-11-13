@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace KidsLocker.Service.Scheduling;
 
 /// <summary>
@@ -18,10 +20,11 @@ public sealed class Schedule
     /// <summary>Разовые дополнительные разрешённые интервалы на конкретную дату (например, «+1 час сегодня вечером»).</summary>
     public List<DatedInterval> Extras { get; set; } = new();
 
-    /// <summary>Если задано и сейчас &lt; этого локального времени, контроль на паузе (всё разрешено).</summary>
+    /// <summary>Конец паузы по Москве (UTC+3). Пауза действует только при подтверждённом времени.</summary>
+    [JsonConverter(typeof(MoscowPauseConverter))]
     public DateTime? PauseUntil { get; set; }
 
-    /// <summary>Последний замеченный id локального часового пояса; нужен, чтобы заметить подмену часового пояса.</summary>
+    /// <summary>Старое поле для совместимости с сохранёнными файлами. На московское расписание не влияет.</summary>
     public string? LastTimeZoneId { get; set; }
 
     public static readonly string[] DayKeys = { "sun", "mon", "tue", "wed", "thu", "fri", "sat" };

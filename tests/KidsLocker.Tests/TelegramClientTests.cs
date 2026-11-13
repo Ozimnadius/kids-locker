@@ -6,6 +6,23 @@ namespace KidsLocker.Tests;
 
 public class TelegramClientTests
 {
+    [Fact]
+    public async Task PollUpdates_ExposesServerDateForFreshnessWithoutWindowsClock()
+    {
+        using var http = new HttpClient(new ServerDateHandler());
+        var poll = await new TelegramClient("token", http).PollUpdatesAsync(0, 0, default);
+        Assert.Equal(new DateTimeOffset(2026, 11, 14, 18, 0, 0, TimeSpan.Zero), poll.ServerUtc);
+    }
+
+    private sealed class ServerDateHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"ok\":true,\"result\":[]}") };
+            response.Headers.Date = new DateTimeOffset(2026, 11, 14, 18, 0, 0, TimeSpan.Zero);
+            return Task.FromResult(response);
+        }
+    }
     private sealed class StubHandler : HttpMessageHandler
     {
         private readonly HttpStatusCode _code;

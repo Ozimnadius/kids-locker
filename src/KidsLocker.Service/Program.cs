@@ -5,6 +5,7 @@ using KidsLocker.Service.Gui;
 using KidsLocker.Service.Notifications;
 using KidsLocker.Service.Scheduling;
 using KidsLocker.Service.Telegram;
+using KidsLocker.Service.Time;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.WindowsServices;
@@ -18,8 +19,29 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        try { return MainCore(args); }
+        catch (Exception ex)
+        {
+            OperationalLog.Write("Ошибка запуска: " + ex);
+            WindowsEventLog.TryWrite("Ошибка запуска KidsLocker: " + ex.Message);
+            return 1;
+        }
+    }
+
+    private static int MainCore(string[] args)
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
         var a = args ?? Array.Empty<string>();
         bool Has(string flag) => a.Any(x => string.Equals(x, flag, StringComparison.OrdinalIgnoreCase));
+
+        if (Has("--diagnose"))
+        {
+            var report = Diagnostics.Collect();
+            var path = ValueAfter(a, "--diagnose");
+            if (path is null) Console.WriteLine(report);
+            else File.WriteAllText(path, report);
+            return 0;
+        }
 
         // Разовые служебные режимы для установщика и задач планировщика.
         if (Has("--install-eventsource")) { WindowsEventLog.EnsureSource(); return 0; }
@@ -44,6 +66,7 @@ internal static class Program
 
     private static void RunHost(string[] a)
     {
+        OperationalLog.Write($"Запуск службы/консоли. Режим Windows: {SystemBootMode.Describe}; версия: {typeof(Program).Assembly.GetName().Version}");
         var config = AppConfig.Load();
         var live = ComputeLive(a);
 
@@ -52,7 +75,8 @@ internal static class Program
 
         builder.Logging.ClearProviders();
         builder.Logging.AddSimpleConsole(o => o.TimestampFormat = "HH:mm:ss ");
-        if (WindowsServiceHelpers.IsWindowsService())
+        // В безопасном режиме необязательный провайдер журнала событий не должен сорвать старт хоста.
+        if (WindowsServiceHelpers.IsWindowsService() && !SystemBootMode.IsSafeMode)
             builder.Logging.AddEventLog(s => { s.SourceName = WindowsEventLog.Source; s.LogName = WindowsEventLog.LogName; });
 
         TelegramClient? telegram = null;
@@ -64,9 +88,14 @@ internal static class Program
 
         builder.Services.AddSingleton(config);
         builder.Services.AddSingleton<ScheduleStore>();
+        builder.Services.AddSingleton(_ => InternetTimeSource.CreateHttpClient());
+        builder.Services.AddSingleton<IInternetTimeSource>(sp => new InternetTimeSource(sp.GetRequiredService<HttpClient>()));
+        builder.Services.AddSingleton<TrustedClock>();
         builder.Services.AddSingleton(sp => new Notifier(sp.GetRequiredService<ILogger<Notifier>>(), config, telegram));
         builder.Services.AddSingleton(sp => new Enforcer(sp.GetRequiredService<ILogger<Enforcer>>(), live));
-        builder.Services.AddSingleton(sp => new CommandHandler(sp.GetRequiredService<ScheduleStore>(), sp.GetRequiredService<Enforcer>()));
+        builder.Services.AddSingleton(sp => new CommandHandler(sp.GetRequiredService<ScheduleStore>(), sp.GetRequiredService<Enforcer>(),
+            () => TrustedSchedule.LocalNow(sp.GetRequiredService<ScheduleStore>().Get(), sp.GetRequiredService<TrustedClock>().UtcNow)));
+        builder.Services.AddHostedService<TimePipeServer>();
         builder.Services.AddHostedService<EnforcementWorker>();
         builder.Services.AddHostedService<StopAlertService>();
 
@@ -120,14 +149,17 @@ internal static class Program
         var store = new ScheduleStore();
         var enforcer = new Enforcer(lf.CreateLogger<Enforcer>(), live);
 
-        var eval = ScheduleEvaluator.Evaluate(store.Load(), DateTime.Now);
-        lf.CreateLogger("enforce-once").LogInformation("blocked={Blocked} ({Reason}), live={Live}", eval.Blocked, eval.Reason, live);
+        var schedule = store.Load();
+        var utc = schedule.Enabled ? await TrustedTimeReader.GetUtcAsync(startup: true) : null;
+        var eval = TrustedSchedule.Evaluate(schedule, utc);
+        lf.CreateLogger("enforce-once").LogInformation("Решение: {Decision}. {Reason}. Режим: {Mode}",
+            eval.Blocked ? "запрет" : "разрешение", eval.Reason, live ? "боевой" : "тестовый");
 
         if (eval.Blocked)
         {
-            var who = SessionQuery.ActiveConsoleUser();
-            await notifier.AlertAsync($"Запрещённое время{(who is null ? "" : $" (сеанс: {who})")}. Выключаю компьютер.");
-            enforcer.ShutdownNow("enforce-once: " + eval.Reason);
+            using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            try { await notifier.AlertAsync($"Работа запрещена: {eval.Reason}. Выключаю компьютер.", budget.Token); }
+            finally { enforcer.ShutdownNow(eval.Reason); }
         }
 
         http?.Dispose();

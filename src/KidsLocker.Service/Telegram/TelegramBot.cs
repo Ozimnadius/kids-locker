@@ -1,5 +1,7 @@
 using System.Runtime.Versioning;
 using KidsLocker.Service.Config;
+using KidsLocker.Service.Time;
+using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -17,13 +19,15 @@ public sealed class TelegramBot : BackgroundService
     private readonly AppConfig _config;
     private readonly TelegramClient _client;
     private readonly CommandHandler _handler;
+    private readonly TrustedClock _clock;
 
-    public TelegramBot(ILogger<TelegramBot> log, AppConfig config, TelegramClient client, CommandHandler handler)
+    public TelegramBot(ILogger<TelegramBot> log, AppConfig config, TelegramClient client, CommandHandler handler, TrustedClock clock)
     {
         _log = log;
         _config = config;
         _client = client;
         _handler = handler;
+        _clock = clock;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -34,7 +38,8 @@ public sealed class TelegramBot : BackgroundService
         // Настоящий долгий опрос должен какое-то время висеть на сервере; нулевой или короткий таймаут
         // при сбоящем адресе и превращает цикл в холостую молотилку, поэтому держим разумный минимум.
         var pollSeconds = Math.Clamp(_config.TelegramLongPollSeconds, 20, 90);
-        var startedUtc = DateTimeOffset.UtcNow;
+        var startedStamp = Stopwatch.GetTimestamp();
+        DateTimeOffset? startedUtc = null;
         long offset = LoadOffset();
         var failures = 0;
 
@@ -58,12 +63,25 @@ public sealed class TelegramBot : BackgroundService
                     continue;
                 }
 
+                // Date приходит от HTTPS API Telegram и служит только для свежести команд.
+                // В расписание он не попадает; /off и /schedule остаются доступны при отказе API времени.
+                if (startedUtc is null)
+                {
+                    var reference = _clock.UtcNow ?? poll.ServerUtc;
+                    if (reference is null)
+                    {
+                        await Task.Delay(2000, stoppingToken);
+                        continue;
+                    }
+                    startedUtc = reference - Stopwatch.GetElapsedTime(startedStamp);
+                }
+
                 failures = 0;
                 foreach (var u in poll.Updates)
                 {
                     offset = Math.Max(offset, u.UpdateId + 1);
                     SaveOffset(offset); // сохраняем ДО выполнения, чтобы перезапуск (или убивший нас /shutdown) не выполнил команду повторно
-                    if (IsStale(u.Message, startedUtc))
+                    if (IsStale(u.Message, startedUtc.Value))
                         continue; // команда накопилась, пока ПК был выключен, — сейчас её не выполняем
                     await Dispatch(u, stoppingToken);
                 }
