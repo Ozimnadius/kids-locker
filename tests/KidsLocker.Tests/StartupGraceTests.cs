@@ -108,10 +108,13 @@ public class StartupGraceTests
 
     private sealed class WaitingSource : IInternetTimeSource
     {
-        public bool Cancelled { get; private set; }
+        private CancellationToken _token;
+        // Проверяем состояние токена: отдельный callback мог быть снят при
+        // завершении Task.Delay раньше, чем очередь отмены успевала вызвать его.
+        public bool Cancelled => _token.IsCancellationRequested;
         public async Task<DateTimeOffset?> GetUtcAsync(CancellationToken ct)
         {
-            using var registration = ct.Register(() => Cancelled = true);
+            _token = ct;
             await Task.Delay(Timeout.Infinite, ct);
             return null;
         }

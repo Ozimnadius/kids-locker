@@ -49,11 +49,15 @@ public class SafeModeReliabilityTests
     [Fact]
     public void ProcessWithOpenOutputPipe_DoesNotBypassTimeout()
     {
-        var ps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
+        // Прямой запуск лёгкого процесса исключает загрузку PowerShell.
+        // Без ограничения чтение открытого stdout заняло бы около 30 секунд;
+        // запас до 10 секунд учитывает нагрузку сервера сборки и завершение дерева.
+        var ping = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "PING.EXE");
         var timer = Stopwatch.StartNew();
-        var result = ProcessRunner.Run(ps, "-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 8\"", 150);
-        Assert.NotEqual(0, result.code);
-        Assert.True(timer.Elapsed < TimeSpan.FromSeconds(4), $"Ожидание заняло {timer.Elapsed}");
+        var result = ProcessRunner.Run(ping, "-n 31 -w 1000 127.0.0.1", 150);
+        Assert.Equal(-1, result.code);
+        Assert.Contains("150 мс", result.output);
+        Assert.True(timer.Elapsed < TimeSpan.FromSeconds(10), $"Ожидание заняло {timer.Elapsed}");
     }
 
     private sealed class BrokenLogger<T> : ILogger<T>
