@@ -42,6 +42,9 @@ public static class Installer
         void L(string m) => log?.Invoke(m);
         if (!IsElevated()) throw new InvalidOperationException("Требуются права администратора.");
 
+        using var gate = InstallationGate.Enter();
+        ValidateRecoveryDirectories();
+        ExecutableRecovery.Store.Disable();
         var source = Environment.ProcessPath ?? throw new InvalidOperationException("Не удалось определить путь к exe.");
 
         // Освобождаем установленный exe ПЕРЕД записью поверх него: сначала убираем задачи (чтобы
@@ -60,6 +63,7 @@ public static class Installer
         // 2) Папка данных + ACL.
         AppPaths.EnsureRoot();
         LockDownDataFolder(L);
+        RecoveryProtection.SecureDirectory(Path.GetDirectoryName(ExecutableRecovery.Store.BackupPath)!);
 
         // 3) Источник журнала событий.
         try { WindowsEventLog.EnsureSource(); L("Источник журнала зарегистрирован."); }
@@ -68,6 +72,8 @@ public static class Installer
         // 4) Служба.
         CreateService(dryRun, L);
         RegisterSafeBoot(L);
+        ExecutableRecovery.Store.Publish();
+        L("Новая резервная копия exe сохранена и проверена.");
 
         // 5) Задачи планировщика.
         CreateTasks(dryRun, L);
@@ -85,6 +91,11 @@ public static class Installer
     {
         void L(string m) => log?.Invoke(m);
         if (!IsElevated()) throw new InvalidOperationException("Требуются права администратора.");
+
+        using var gate = InstallationGate.Enter();
+        ValidateRecoveryDirectories();
+        // Даже уже запущенная задача после освобождения блокировки не воскресит удалённую программу.
+        ExecutableRecovery.Store.Disable();
 
         // Сначала останавливаем службу, чтобы она не самовосстановилась (пересоздала задачи/ключи), пока мы их убираем.
         RemoveTasks();
@@ -118,6 +129,7 @@ public static class Installer
 
     private static void RemoveTasks()
     {
+        RunProcess("schtasks.exe", $"/delete /tn \"{ExecutableRecovery.TaskName}\" /f");
         RunProcess("schtasks.exe", $"/delete /tn \"{GuardianTask}\" /f");
         RunProcess("schtasks.exe", $"/delete /tn \"{EnforceTask}\" /f");
     }
@@ -147,7 +159,12 @@ public static class Installer
     /// </summary>
     public static string EnsureHardening(bool dryRun)
     {
+        using var gate = InstallationGate.TryEnter(TimeSpan.Zero);
+        if (gate is null || !ExecutableRecovery.Store.Enabled) return "";
         var restored = new List<string>();
+
+        TryRepairBackup(() => ExecutableRecovery.Store.EnsureBackup(), restored,
+            message => OperationalLog.Write(message));
 
         // SafeBoot проверяем первым: планировщик может быть недоступен в безопасном режиме.
         if (!SafeBootExists("Minimal") || !SafeBootExists("Network"))
@@ -156,13 +173,21 @@ public static class Installer
             restored.Add("безопасный режим");
         }
 
-        if (!SystemBootMode.IsSafeMode && (!TaskExists(GuardianTask) || !TaskExists(EnforceTask)))
+        if (!SystemBootMode.IsSafeMode && (!TaskExists(GuardianTask) || !TaskExists(EnforceTask)
+            || (ExecutableRecovery.Store.Enabled && !TaskExists(ExecutableRecovery.TaskName))))
         {
             CreateTasks(dryRun, _ => { });
             restored.Add("задачи планировщика");
         }
 
         return string.Join(", ", restored);
+    }
+
+    internal static void TryRepairBackup(Func<bool> repair, List<string> restored, Action<string> report)
+    {
+        try { if (repair()) restored.Add("резервная копия exe"); }
+        catch (Exception ex) { report("Не удалось восстановить резервную копию exe: " + ex.Message); }
+        // Ошибка копии не должна отменять последующие проверки SafeBoot и задач.
     }
 
     private static bool TaskExists(string name) =>
@@ -218,10 +243,25 @@ public static class Installer
 
         var g = RegisterTaskFromXml(GuardianTask, guardianXml);
         var e = RegisterTaskFromXml(EnforceTask, enforceXml);
+        if (ExecutableRecovery.Store.Enabled)
+        {
+            var recovery = RegisterTaskFromXml(ExecutableRecovery.TaskName, RecoveryTaskXml());
+            if (!recovery.ok) throw new InvalidOperationException("Не удалось создать задачу восстановления exe: " + recovery.output);
+            L("Задача восстановления exe создана: при загрузке и каждую минуту.");
+        }
         if (g.ok && e.ok)
             L("Задачи планировщика созданы (guardian + enforce).");
         else
             L($"⚠ Задачи планировщика созданы не полностью — guardian: {(g.ok ? "ок" : "ошибка")}, enforce: {(e.ok ? "ок" : "ошибка")}. {g.output} {e.output}".Trim());
+    }
+
+    private static string RecoveryTaskXml() => TaskXml(ExecutableRecovery.Store.BackupPath, "--recover",
+        new[] { BootTrigger(), TimeTriggerRepeating("PT1M") });
+
+    private static void ValidateRecoveryDirectories()
+    {
+        RecoveryProtection.RejectRedirect(AppPaths.RootDir);
+        RecoveryProtection.RejectRedirect(Path.GetDirectoryName(ExecutableRecovery.Store.BackupPath)!);
     }
 
     private static (bool ok, string output) RegisterTaskFromXml(string name, string xml)
@@ -241,13 +281,8 @@ public static class Installer
 
     private static void LockDownDataFolder(Action<string> L)
     {
-        var dir = AppPaths.RootDir;
-        // SYSTEM + администраторы — полный доступ; пользователи — чтение+выполнение; наследование разорвано.
-        var (code, output) = RunProcess("icacls.exe", $"\"{dir}\" /inheritance:r /grant:r \"*S-1-5-18:(OI)(CI)F\" \"*S-1-5-32-544:(OI)(CI)F\" \"*S-1-5-32-545:(OI)(CI)RX\"");
-        if (code == 0)
-            L("ACL на папку данных установлены.");
-        else
-            L($"⚠ ACL на папку данных не установлены (icacls.exe, код {code}): {output}");
+        RecoveryProtection.SecureDirectory(AppPaths.RootDir);
+        L("Владелец и права папки данных проверены.");
     }
 
     // --- Сборка XML задачи ---

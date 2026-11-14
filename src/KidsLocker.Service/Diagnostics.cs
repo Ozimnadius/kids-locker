@@ -26,6 +26,9 @@ internal static class Diagnostics
             _ => "состояние неизвестно"
         }));
         text.AppendLine($"Установленный exe существует: {(File.Exists(Installer.InstalledExe) ? "да" : "нет")}");
+        text.AppendLine($"Резервная копия exe: {(File.Exists(Setup.ExecutableRecovery.Store.BackupPath) ? "есть" : "нет")}");
+        text.AppendLine($"Восстановление exe включено: {(Setup.ExecutableRecovery.Store.Enabled ? "да" : "нет")}");
+        text.AppendLine($"Путь резервной копии: {Setup.ExecutableRecovery.Store.BackupPath}");
         text.AppendLine($"Папка данных: {AppPaths.RootDir}");
         try
         {
