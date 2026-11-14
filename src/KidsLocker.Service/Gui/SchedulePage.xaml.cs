@@ -33,14 +33,20 @@ public sealed partial class SchedulePage : UserControl, IPage
     private readonly List<DayRow> _rows = new();
     private string[] _savedTexts = Array.Empty<string>();
     private bool _refreshingStatus;
+    private readonly Func<Task<DateTimeOffset?>> _readUtc;
 
-    public SchedulePage(IShell shell)
+    public SchedulePage(IShell shell) : this(shell, () => TrustedTimeReader.GetUtcAsync()) { }
+
+    internal SchedulePage(IShell shell, Func<Task<DateTimeOffset?>> readUtc)
     {
         InitializeComponent();
         _shell = shell;
+        _readUtc = readUtc;
         LoadSchedule();
         Days.ItemsSource = _rows;
-        RefreshStatus();
+        // После диалога пароля Application.Run ещё не начался. Прямой async-вызов
+        // здесь теряет контекст окна и после ответа сети обращается к WPF из пула потоков.
+        Dispatcher.InvokeAsync(RefreshStatus);
     }
 
     public void SetBusy(bool busy)
@@ -235,7 +241,7 @@ public sealed partial class SchedulePage : UserControl, IPage
         _refreshingStatus = true;
         try
         {
-            var utc = await TrustedTimeReader.GetUtcAsync();
+            var utc = await _readUtc();
             if (ReadScheduleQuietly() is not { } s) return;
             if (Enabled.IsEnabled) Enabled.IsChecked = s.Enabled;
             var eval = TrustedSchedule.Evaluate(s, utc);
