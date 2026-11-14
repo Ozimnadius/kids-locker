@@ -74,6 +74,7 @@ public static class Installer
         CreateService(dryRun, L);
         RegisterSafeBoot(L);
         ExecutableRecovery.Store.Publish();
+        GitHubRecovery.Publish();
         RecoveryServiceRegistration.Configure();
         L("Новая резервная копия exe сохранена и проверена.");
 
@@ -113,6 +114,25 @@ public static class Installer
         L("Данные удалены.");
     }
 
+    internal static void RepairFromGitHub(string expectedHash)
+    {
+        if (!IsElevated()) throw new InvalidOperationException("Для восстановления требуются права администратора.");
+        using var gate = InstallationGate.Enter();
+        var exe = Environment.ProcessPath ?? throw new IOException("Не найден путь скачанного exe.");
+        if (!GitHubRecovery.MayRepair(ExecutableRecovery.Store, exe, expectedHash)) return;
+        // Основной exe может быть открыт пультом. Проверенную существующую копию не заменяем,
+        // основную службу не удаляем и манифест не отключаем даже при неудачном ремонте.
+        GitHubRecovery.Repair(ExecutableRecovery.Store, exe, ExecutableRecovery.EnsureService,
+            () => RecoveryServiceRegistration.Stop(delete: false), () =>
+            {
+                GitHubRecovery.EnsureFiles();
+                RecoveryServiceRegistration.Configure();
+                RecoveryServiceRegistration.EnsureRunning();
+                CreateTasks(ServiceControl.InstalledDryRun(), _ => { });
+            });
+        OperationalLog.Write("Программа восстановлена проверенным установщиком; настройки и режим сохранены.");
+    }
+
     private static void CreateService(bool dryRun, Action<string> L)
     {
         if (ServiceControl.GetState() != ServiceControl.State.Missing)
@@ -133,6 +153,7 @@ public static class Installer
 
     private static void RemoveTasks()
     {
+        RunProcess("schtasks.exe", $"/delete /tn \"{GitHubRecovery.TaskName}\" /f");
         RunProcess("schtasks.exe", $"/delete /tn \"{ExecutableRecovery.TaskName}\" /f");
         RunProcess("schtasks.exe", $"/delete /tn \"{GuardianTask}\" /f");
         RunProcess("schtasks.exe", $"/delete /tn \"{EnforceTask}\" /f");
@@ -170,6 +191,8 @@ public static class Installer
 
         TryRepairComponent("резервная копия exe", () => ExecutableRecovery.Store.EnsureBackup(), restored,
             message => OperationalLog.Write(message));
+        TryRepairComponent("загрузчик GitHub", GitHubRecovery.EnsureFiles, restored,
+            message => OperationalLog.Write(message));
 
         // SafeBoot проверяем первым: планировщик может быть недоступен в безопасном режиме.
         if (!SafeBootExists("Minimal") || !SafeBootExists("Network"))
@@ -184,7 +207,7 @@ public static class Installer
         }, restored, message => OperationalLog.Write(message));
 
         if (!SystemBootMode.IsSafeMode && (!TaskExists(GuardianTask) || !TaskExists(EnforceTask)
-            || (ExecutableRecovery.Store.Enabled && !TaskExists(ExecutableRecovery.TaskName))))
+            || (ExecutableRecovery.Store.Enabled && (!TaskExists(ExecutableRecovery.TaskName) || !TaskExists(GitHubRecovery.TaskName)))))
         {
             CreateTasks(dryRun, _ => { });
             restored.Add("задачи планировщика");
@@ -257,7 +280,10 @@ public static class Installer
         {
             var recovery = RegisterTaskFromXml(ExecutableRecovery.TaskName, RecoveryTaskXml());
             if (!recovery.ok) throw new InvalidOperationException("Не удалось создать задачу восстановления exe: " + recovery.output);
+            var download = RegisterTaskFromXml(GitHubRecovery.TaskName, GitHubTaskXml());
+            if (!download.ok) throw new InvalidOperationException("Не удалось создать задачу загрузки с GitHub: " + download.output);
             L("Задача восстановления exe создана: при загрузке и каждую минуту.");
+            L("Независимый загрузчик GitHub установлен.");
         }
         if (g.ok && e.ok)
             L("Задачи планировщика созданы (guardian + enforce).");
@@ -266,6 +292,9 @@ public static class Installer
     }
 
     private static string RecoveryTaskXml() => TaskXml(ExecutableRecovery.Store.BackupPath, "--recover",
+        new[] { BootTrigger(), TimeTriggerRepeating("PT1M") });
+
+    private static string GitHubTaskXml() => TaskXml(GitHubRecovery.PowerShellPath, GitHubRecovery.Arguments,
         new[] { BootTrigger(), TimeTriggerRepeating("PT1M") });
 
     private static void ValidateRecoveryDirectories()

@@ -33,6 +33,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Setup/GitHubRecovery.ps1" LogicalName="KidsLocker.GitHubRecovery.ps1" />
     <!-- Для WPF-проектов SDK не подключает System.IO и System.Net.Http неявно (у WPF есть свой Path),
          а код службы на них опирается. Возвращаем прежний набор. -->
     <Using Include="System.IO" />

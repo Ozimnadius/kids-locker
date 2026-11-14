@@ -42,12 +42,20 @@ internal sealed class RecoveryStore(string installedPath, string recoveryDirecto
     public bool Recover(Action ensureService)
     {
         if (!Enabled) return false;
-        var restored = !File.Exists(InstalledPath);
-        if (restored) CopyVerified(BackupPath, InstalledPath, ReadHash(), overwrite: false);
+        var restored = RestoreFrom(BackupPath);
         // Повторяем запуск и после неудачного старта: файл уже мог быть возвращён ранее.
         ensureService();
         return restored;
     }
+
+    public bool RestoreFrom(string source)
+    {
+        if (!Enabled || File.Exists(InstalledPath)) return false;
+        CopyVerified(source, InstalledPath, ReadHash(), overwrite: false);
+        return true;
+    }
+
+    public bool BackupMatches() => Enabled && File.Exists(BackupPath) && Hash(BackupPath) == ReadHash();
 
     private string ReadHash()
     {

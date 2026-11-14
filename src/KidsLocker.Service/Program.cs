@@ -53,6 +53,12 @@ internal static class Program
         }
 
         // Разовые служебные режимы для установщика и задач планировщика.
+        if (Has("--repair-from-github"))
+        {
+            Setup.Installer.RepairFromGitHub(ValueAfter(a, "--repair-from-github")
+                ?? throw new ArgumentException("Не передана контрольная сумма восстановления."));
+            return 0;
+        }
         if (Has("--install-eventsource")) { WindowsEventLog.EnsureSource(); return 0; }
         if (Has("--recover")) { Setup.ExecutableRecovery.Run(); return 0; }
         if (Has("--enforce-once")) { EnforceOnce(a).GetAwaiter().GetResult(); return 0; }
