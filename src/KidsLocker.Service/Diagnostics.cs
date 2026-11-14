@@ -29,6 +29,7 @@ internal static class Diagnostics
         text.AppendLine($"Резервная копия exe: {(File.Exists(Setup.ExecutableRecovery.Store.BackupPath) ? "есть" : "нет")}");
         text.AppendLine($"Восстановление exe включено: {(Setup.ExecutableRecovery.Store.Enabled ? "да" : "нет")}");
         text.AppendLine($"Путь резервной копии: {Setup.ExecutableRecovery.Store.BackupPath}");
+        text.AppendLine($"Независимый загрузчик GitHub: {(File.Exists(GitHubRecovery.ScriptPath) ? "есть" : "нет")}");
         text.AppendLine("Резервная служба: " + (RecoveryServiceRegistration.GetState() switch
         {
             ServiceControl.State.Running => "работает",

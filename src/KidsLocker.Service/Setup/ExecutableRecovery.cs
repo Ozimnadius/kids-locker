@@ -14,6 +14,7 @@ internal static class ExecutableRecovery
         RunOnce(Store, EnsureService, () => InstallationGate.TryEnter(TimeSpan.Zero),
             () => OperationalLog.Write("Основной exe восстановлен из резервной копии; запуск службы проверен."),
             ex => OperationalLog.Write("Ошибка восстановления exe: " + ex.Message));
+        GitHubRecovery.TryStart();
     }
 
     internal static bool RunOnce(RecoveryStore store, Action ensureService, Func<InstallationGate?> enter,
@@ -31,7 +32,7 @@ internal static class ExecutableRecovery
         catch (Exception ex) when (onError is not null) { onError(ex); return false; }
     }
 
-    private static void EnsureService()
+    internal static void EnsureService()
     {
         // Основная служба могла остаться в SCM, но потерять разрешение SafeBoot.
         SafeBootRegistration.Register();

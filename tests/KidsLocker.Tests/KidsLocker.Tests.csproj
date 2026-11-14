@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Update="GitHubRecoveryScriptTests.ps1" CopyToOutputDirectory="PreserveNewest" />
     <ProjectReference Include="..\..\src\KidsLocker.Service\KidsLocker.Service.csproj" />
   </ItemGroup>
 
