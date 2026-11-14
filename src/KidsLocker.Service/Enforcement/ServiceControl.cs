@@ -105,18 +105,18 @@ public static class ServiceControl
     /// тестовую установку, воскрешённую хранителем, не начало молча выключать ПК по-настоящему.</summary>
     public static bool TryRecreate()
     {
-        var exe = Environment.ProcessPath;
-        if (string.IsNullOrEmpty(exe)) return false;
+        // Хранитель может выполняться из резервной копии. Служба всегда использует основной exe.
+        var exe = Setup.Installer.InstalledExe;
+        if (!File.Exists(exe)) return false;
 
         var dryRun = InstalledDryRun();
-        var okCreate = RunSc($"create {ServiceName} binPath= {BuildBinPath(exe, dryRun)} start= auto obj= LocalSystem DisplayName= KidsLocker");
+        RunSc($"create {ServiceName} binPath= {BuildBinPath(exe, dryRun)} start= auto obj= LocalSystem DisplayName= KidsLocker");
         RunSc($"description {ServiceName} \"KidsLocker parental time control\"");
         RunSc($"failure {ServiceName} reset= 86400 actions= restart/5000/restart/5000/restart/5000");
         RunSc($"failureflag {ServiceName} 1");
         try { Setup.SafeBootRegistration.Register(); }
         catch { return false; }
-        var okStart = RunSc($"start {ServiceName}");
-        return okCreate || okStart;
+        return TryStart();
     }
 
     /// <summary>

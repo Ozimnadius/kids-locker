@@ -45,6 +45,7 @@ internal static class Program
 
         // Разовые служебные режимы для установщика и задач планировщика.
         if (Has("--install-eventsource")) { WindowsEventLog.EnsureSource(); return 0; }
+        if (Has("--recover")) { Setup.ExecutableRecovery.Run(); return 0; }
         if (Has("--enforce-once")) { EnforceOnce(a).GetAwaiter().GetResult(); return 0; }
         if (Has("--guard")) { Guard(a).GetAwaiter().GetResult(); return 0; }
         if (Has("--test-telegram")) { return TestTelegram(a).GetAwaiter().GetResult(); }
@@ -166,30 +167,40 @@ internal static class Program
 
     private static async Task Guard(string[] a)
     {
+        string? message;
+        // Синхронная часть удерживает mutex в одном потоке; сеть вызывается после его освобождения.
+        using (var gate = Setup.InstallationGate.TryEnter(TimeSpan.Zero))
+        {
+            if (gate is null || !Setup.ExecutableRecovery.Store.Enabled) return;
+            message = GuardService();
+        }
+        if (message is null) return;
         var cfg = AppConfig.Load();
         using var lf = LoggerFactory.Create(b => b.AddSimpleConsole(o => o.TimestampFormat = "HH:mm:ss "));
         var (notifier, http) = BuildNotifier(cfg, lf);
 
+        try { await notifier.AlertAsync(message); }
+        finally { http?.Dispose(); }
+    }
+
+    private static string? GuardService()
+    {
         switch (ServiceControl.GetState())
         {
             case ServiceControl.State.Running:
-                break;
+                return null;
             case ServiceControl.State.Stopped:
-                if (ServiceControl.TryStart())
-                    await notifier.AlertAsync("Служба KidsLocker была остановлена — запустил заново.");
-                else
-                    await notifier.AlertAsync("Служба KidsLocker остановлена и не запускается — проверьте ПК.");
-                break;
+                return ServiceControl.TryStart()
+                    ? "Служба KidsLocker была остановлена — запустил заново."
+                    : "Служба KidsLocker остановлена и не запускается — проверьте ПК.";
             case ServiceControl.State.Missing:
-                await notifier.AlertAsync("Служба KidsLocker была удалена — восстанавливаю.");
-                if (!ServiceControl.TryRecreate())
-                    await notifier.AlertAsync("Не удалось восстановить службу KidsLocker — проверьте ПК.");
-                break;
+                return ServiceControl.TryRecreate()
+                    ? "Служба KidsLocker была удалена — восстановил."
+                    : "Не удалось восстановить службу KidsLocker — проверьте ПК.";
             case ServiceControl.State.Other:
-                break;
+                return null;
         }
-
-        http?.Dispose();
+        return null;
     }
 
     private static async Task<int> TestTelegram(string[] a)
