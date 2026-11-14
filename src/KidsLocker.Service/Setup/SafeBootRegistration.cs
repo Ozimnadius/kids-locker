@@ -5,17 +5,17 @@ namespace KidsLocker.Service.Setup;
 /// <summary>Регистрация проверяется по значению, а не только по существованию ключа.</summary>
 internal static class SafeBootRegistration
 {
-    private static string PathFor(string mode) => $@"SYSTEM\CurrentControlSet\Control\SafeBoot\{mode}\{Installer.ServiceName}";
+    internal static string PathFor(string mode, string service) => $@"SYSTEM\CurrentControlSet\Control\SafeBoot\{mode}\{service}";
 
-    public static string? Read(string mode)
+    public static string? Read(string mode, string service = Installer.ServiceName)
     {
-        using var key = Registry.LocalMachine.OpenSubKey(PathFor(mode));
+        using var key = Registry.LocalMachine.OpenSubKey(PathFor(mode, service));
         return key?.GetValue(null) as string;
     }
 
-    public static void Register() => Ensure(Read, mode =>
+    public static void Register(string service = Installer.ServiceName) => Ensure(mode => Read(mode, service), mode =>
     {
-        using var key = Registry.LocalMachine.CreateSubKey(PathFor(mode), writable: true);
+        using var key = Registry.LocalMachine.CreateSubKey(PathFor(mode, service), writable: true);
         key.SetValue("", "Service", RegistryValueKind.String);
     });
 

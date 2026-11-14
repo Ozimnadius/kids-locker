@@ -51,6 +51,7 @@ public static class Installer
         // хранитель не воскресил службу посреди установки), затем останавливаем и удаляем службу.
         RemoveTasks();
         StopAndDeleteService(L);
+        RecoveryServiceRegistration.Stop(delete: false);
 
         // 1) Копируем этот exe в Program Files (пропускаем, если уже запущены оттуда).
         Directory.CreateDirectory(InstallDir);
@@ -73,12 +74,14 @@ public static class Installer
         CreateService(dryRun, L);
         RegisterSafeBoot(L);
         ExecutableRecovery.Store.Publish();
+        RecoveryServiceRegistration.Configure();
         L("Новая резервная копия exe сохранена и проверена.");
 
         // 5) Задачи планировщика.
         CreateTasks(dryRun, L);
 
         // 6) Запуск.
+        RecoveryServiceRegistration.EnsureRunning();
         var (startCode, startOut) = RunProcess("sc.exe", $"start {ServiceName}");
         if (startCode == 0)
             L("Служба запущена.");
@@ -100,6 +103,7 @@ public static class Installer
         // Сначала останавливаем службу, чтобы она не самовосстановилась (пересоздала задачи/ключи), пока мы их убираем.
         RemoveTasks();
         StopAndDeleteService(L);
+        RecoveryServiceRegistration.Stop(delete: true);
         RemoveTasks();          // ещё раз — вдруг служба пересоздала задачу в окне остановки
         UnregisterSafeBoot();
         L("Служба и задачи удалены.");
@@ -147,8 +151,9 @@ public static class Installer
     private static void UnregisterSafeBoot()
     {
         foreach (var set in new[] { "Minimal", "Network" })
+        foreach (var service in new[] { ServiceName, RecoveryServiceRegistration.Name })
             RunProcess("reg.exe",
-                $"delete \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\{set}\\{ServiceName}\" /f");
+                $"delete \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\{set}\\{service}\" /f");
     }
 
     /// <summary>
@@ -163,7 +168,7 @@ public static class Installer
         if (gate is null || !ExecutableRecovery.Store.Enabled) return "";
         var restored = new List<string>();
 
-        TryRepairBackup(() => ExecutableRecovery.Store.EnsureBackup(), restored,
+        TryRepairComponent("резервная копия exe", () => ExecutableRecovery.Store.EnsureBackup(), restored,
             message => OperationalLog.Write(message));
 
         // SafeBoot проверяем первым: планировщик может быть недоступен в безопасном режиме.
@@ -172,6 +177,11 @@ public static class Installer
             RegisterSafeBoot(_ => { });
             restored.Add("безопасный режим");
         }
+        TryRepairComponent("резервная служба", () =>
+        {
+            SafeBootRegistration.Register(RecoveryServiceRegistration.Name);
+            return RecoveryServiceRegistration.EnsureRunning();
+        }, restored, message => OperationalLog.Write(message));
 
         if (!SystemBootMode.IsSafeMode && (!TaskExists(GuardianTask) || !TaskExists(EnforceTask)
             || (ExecutableRecovery.Store.Enabled && !TaskExists(ExecutableRecovery.TaskName))))
@@ -183,10 +193,10 @@ public static class Installer
         return string.Join(", ", restored);
     }
 
-    internal static void TryRepairBackup(Func<bool> repair, List<string> restored, Action<string> report)
+    internal static void TryRepairComponent(string component, Func<bool> repair, List<string> restored, Action<string> report)
     {
-        try { if (repair()) restored.Add("резервная копия exe"); }
-        catch (Exception ex) { report("Не удалось восстановить резервную копию exe: " + ex.Message); }
+        try { if (repair()) restored.Add(component); }
+        catch (Exception ex) { report($"Ошибка восстановления ({component}): " + ex.Message); }
         // Ошибка копии не должна отменять последующие проверки SafeBoot и задач.
     }
 

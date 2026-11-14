@@ -29,6 +29,13 @@ internal static class Diagnostics
         text.AppendLine($"Резервная копия exe: {(File.Exists(Setup.ExecutableRecovery.Store.BackupPath) ? "есть" : "нет")}");
         text.AppendLine($"Восстановление exe включено: {(Setup.ExecutableRecovery.Store.Enabled ? "да" : "нет")}");
         text.AppendLine($"Путь резервной копии: {Setup.ExecutableRecovery.Store.BackupPath}");
+        text.AppendLine("Резервная служба: " + (RecoveryServiceRegistration.GetState() switch
+        {
+            ServiceControl.State.Running => "работает",
+            ServiceControl.State.Stopped => "остановлена",
+            ServiceControl.State.Missing => "не установлена",
+            _ => "состояние неизвестно"
+        }));
         text.AppendLine($"Папка данных: {AppPaths.RootDir}");
         try
         {
@@ -36,7 +43,10 @@ internal static class Diagnostics
             text.AppendLine($"Команда службы: {key?.GetValue("ImagePath") ?? "не зарегистрирована"}");
             text.AppendLine($"Тип запуска: {key?.GetValue("Start") ?? "нет"} (2 — автоматический)");
             foreach (var mode in new[] { "Minimal", "Network" })
+            {
                 text.AppendLine($"SafeBoot {mode}: {SafeBootRegistration.Read(mode) ?? "нет записи"} (ожидается Service)");
+                text.AppendLine($"SafeBoot восстановителя {mode}: {SafeBootRegistration.Read(mode, RecoveryServiceRegistration.Name) ?? "нет записи"} (ожидается Service)");
+            }
         }
         catch (Exception ex) { text.AppendLine("Не удалось прочитать реестр: " + ex.Message); }
         text.AppendLine("Последние записи приложения (дата Windows могла быть изменена):");

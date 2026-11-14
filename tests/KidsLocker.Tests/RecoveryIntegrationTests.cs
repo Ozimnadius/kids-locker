@@ -27,7 +27,7 @@ public class RecoveryIntegrationTests
     {
         var restored = new List<string>();
         string? error = null;
-        Installer.TryRepairBackup(() => throw new IOException("Нет места"), restored, message => error = message);
+        Installer.TryRepairComponent("резервная копия exe", () => throw new IOException("Нет места"), restored, message => error = message);
         Assert.Empty(restored);
         Assert.Contains("Нет места", error);
     }
