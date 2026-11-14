@@ -12,21 +12,29 @@ internal static class ExecutableRecovery
     public static void Run()
     {
         RunOnce(Store, EnsureService, () => InstallationGate.TryEnter(TimeSpan.Zero),
-            () => OperationalLog.Write("Основной exe восстановлен из резервной копии; запуск службы проверен."));
+            () => OperationalLog.Write("Основной exe восстановлен из резервной копии; запуск службы проверен."),
+            ex => OperationalLog.Write("Ошибка восстановления exe: " + ex.Message));
     }
 
-    internal static bool RunOnce(RecoveryStore store, Action ensureService, Func<InstallationGate?> enter, Action? onRestored = null)
+    internal static bool RunOnce(RecoveryStore store, Action ensureService, Func<InstallationGate?> enter,
+        Action? onRestored = null, Action<Exception>? onError = null)
     {
         using var gate = enter();
         if (gate is null) return false;
-        var restored = store.Recover(ensureService);
-        // Журнал тоже под блокировкой: после удаления он не должен заново создавать папку данных.
-        if (restored) onRestored?.Invoke();
-        return restored;
+        try
+        {
+            var restored = store.Recover(ensureService);
+            // Журнал тоже под блокировкой: после удаления он не должен заново создавать папку данных.
+            if (restored) onRestored?.Invoke();
+            return restored;
+        }
+        catch (Exception ex) when (onError is not null) { onError(ex); return false; }
     }
 
     private static void EnsureService()
     {
+        // Основная служба могла остаться в SCM, но потерять разрешение SafeBoot.
+        SafeBootRegistration.Register();
         var state = ServiceControl.GetState();
         var ok = state switch
         {

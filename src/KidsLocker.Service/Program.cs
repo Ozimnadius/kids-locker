@@ -43,6 +43,15 @@ internal static class Program
             return 0;
         }
 
+        if (Has("--recovery-service"))
+        {
+            if (!WindowsServiceHelpers.IsWindowsService())
+                throw new InvalidOperationException("Резервную службу запускает диспетчер служб Windows.");
+            using var recovery = new Setup.RecoveryWindowsService();
+            System.ServiceProcess.ServiceBase.Run(recovery);
+            return 0;
+        }
+
         // Разовые служебные режимы для установщика и задач планировщика.
         if (Has("--install-eventsource")) { WindowsEventLog.EnsureSource(); return 0; }
         if (Has("--recover")) { Setup.ExecutableRecovery.Run(); return 0; }
